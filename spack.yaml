@@ -1,0 +1,15 @@
+spack:
+  specs:
+  - cmake
+  - pkg-config
+  - uuid
+  - c-raft
+  - mochi-margo ^mercury~boostsys
+  - mochi-abt-io
+  - json-c
+  - mochi-bedrock
+  - mochi-ssg
+  modules:
+    prefix_inspections:
+      lib: [LD_LIBRARY_PATH]
+      lib64: [LD_LIBRARY_PATH]
