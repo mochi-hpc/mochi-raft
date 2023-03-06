@@ -1,0 +1,22 @@
+#
+# mochi-raft-config.cmake.in
+#
+
+set (MRAFT_VERSION @MRAFT_VERSION@)
+
+@PACKAGE_INIT@
+
+set_and_check (MRAFT_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+
+check_required_components (mochi-raft)
+
+include (CMakeFindDependencyMacro)
+find_dependency (PkgConfig)
+pkg_check_modules (MARGO REQUIRED margo)
+pkg_check_modules (RAFT  REQUIRED raft)
+pkg_check_modules (UUID  REQUIRED uuid)
+pkg_check_modules (ABTIO REQUIRED abt-io)
+pkg_check_modules (SSG   REQUIRED ssg)
+pkg_check_modules (JSONC REQUIRED json-c)
+
+include ("${CMAKE_CURRENT_LIST_DIR}/mochi-raft-targets.cmake")
