@@ -5,6 +5,7 @@
  */
 #include "mochi-raft.h"
 #include "mraft-impl.h"
+#include <stdlib.h>
 
 /* Initialize the backend with operational parameters such as server ID and address. */
 int mraft_impl_init(struct raft_io *io, raft_id id, const char *address)
@@ -132,6 +133,17 @@ int mraft_impl_truncate(struct raft_io *io, raft_index index)
     // TODO
 }
 
+struct snapshot_put_args {
+    struct raft_io*              io;
+    struct raft_io_snapshot_put* req;
+};
+
+static void snapshot_put_ult(void* args)
+{
+    // TODO
+    free(args);
+}
+
 /* Asynchronously persist a new snapshot. If the trailing parameter is greater
  * than zero, then all entries older that snapshot->index - trailing must be deleted.
  * If the trailing parameter is 0, then the snapshot completely replaces all existing
@@ -147,7 +159,23 @@ int mraft_impl_snapshot_put(struct raft_io *io,
                             const struct raft_snapshot *snapshot,
                             raft_io_snapshot_put_cb cb)
 {
+    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    req->cb = cb;
+    struct snapshot_put_args* args = (struct snapshot_put_args*)calloc(1, sizeof(*args));
+    args->io  = io;
+    args->req = req;
+    return ABT_thread_create(impl->pool, snapshot_put_ult, args, ABT_THREAD_ATTR_NULL, NULL);
+}
+
+struct snapshot_get_args {
+    struct raft_io*              io;
+    struct raft_io_snapshot_get* req;
+};
+
+static void snapshot_get_ult(void* args)
+{
     // TODO
+    free(args);
 }
 
 /* Asynchronously load the last snapshot. */
@@ -155,7 +183,12 @@ int mraft_impl_snapshot_get(struct raft_io *io,
                             struct raft_io_snapshot_get *req,
                             raft_io_snapshot_get_cb cb)
 {
-    // TODO
+    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    req->cb = cb;
+    struct snapshot_get_args* args = (struct snapshot_get_args*)calloc(1, sizeof(*args));
+    args->io  = io;
+    args->req = req;
+    return ABT_thread_create(impl->pool, snapshot_get_ult, args, ABT_THREAD_ATTR_NULL, NULL);
 }
 
 /* Return the current time, expressed in milliseconds. */
@@ -171,7 +204,7 @@ int mraft_impl_random(struct raft_io *io, int min, int max)
     return min + pcg32_boundedrand_r(&impl->rng_state, max-min);
 }
 
-static void async_work(void* args)
+static void async_work_ult(void* args)
 {
     struct raft_io_async_work *req = (struct raft_io_async_work*)args;
     int status = req->work(req);
@@ -185,5 +218,5 @@ int mraft_impl_async_work(struct raft_io *io,
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->data;
     req->cb = cb;
-    return ABT_thread_create(impl->pool, async_work, req, ABT_THREAD_ATTR_NULL, NULL);
+    return ABT_thread_create(impl->pool, async_work_ult, req, ABT_THREAD_ATTR_NULL, NULL);
 }
