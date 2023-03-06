@@ -6,10 +6,13 @@
 #ifndef MRAFT_IMPL_H
 #define MRAFT_IMPL_H
 
+#include "pcg_basic.h"
 #include "mochi-raft.h"
 
 struct mraft_impl {
-
+    margo_instance_id mid;
+    ABT_pool          pool;
+    pcg32_random_t    rng_state;
 };
 
 int mraft_impl_init(struct raft_io *io, raft_id id, const char *address);
