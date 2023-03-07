@@ -26,18 +26,20 @@ extern "C" {
  * but their prototype may differ: asynchronous ones are made synchronous and
  * thus do not have a callback and request. Asynchrony is handled by Argobots
  * using ULTs posted to the pool provided to mraft_init.
+ * (The exception is snapshot_get, which still takes a callback as arguments
+ * so that the function can provide it with the snapshot).
  */
 struct mraft_log {
     void* data;
-    int (*load)(struct raft_io*, raft_term*, raft_id*, struct raft_snapshot**, raft_index*, struct raft_entry*[], size_t*);
-    int (*bootstrap)(struct raft_io*, const struct raft_configuration*);
-    int (*recover)(struct raft_io*, const struct raft_configuration*);
-    int (*set_term)(struct raft_io*, raft_term);
-    int (*set_vote)(struct raft_io*, raft_id);
-    int (*append)(struct raft_io*, const struct raft_entry[], unsigned);
-    int (*truncate)(struct raft_io*, raft_index);
-    int (*snapshot_put)(struct raft_io*, unsigned, const struct raft_snapshot*);
-    int (*snapshot_get)(struct raft_io*);
+    int (*load)(struct mraft_log*, raft_term*, raft_id*, struct raft_snapshot**, raft_index*, struct raft_entry*[], size_t*);
+    int (*bootstrap)(struct mraft_log*, const struct raft_configuration*);
+    int (*recover)(struct mraft_log*, const struct raft_configuration*);
+    int (*set_term)(struct mraft_log*, raft_term);
+    int (*set_vote)(struct mraft_log*, raft_id);
+    int (*append)(struct mraft_log*, const struct raft_entry[], unsigned);
+    int (*truncate)(struct mraft_log*, raft_index);
+    int (*snapshot_put)(struct mraft_log*, unsigned, const struct raft_snapshot*);
+    int (*snapshot_get)(struct mraft_log*, struct raft_io_snapshot_get* req, raft_io_snapshot_get_cb cb);
 };
 
 /**
