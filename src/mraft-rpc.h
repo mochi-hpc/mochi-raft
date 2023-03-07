@@ -186,9 +186,9 @@ static inline hg_return_t hg_proc_raft_message(hg_proc_t proc, struct raft_messa
     return HG_SUCCESS;
 }
 
-typedef struct raft_message raft_message;
-
-MERCURY_GEN_PROC(mraft_send_in_t,
-    ((raft_message)(message)))
+static inline hg_return_t hg_proc_mraft_send_in_t(hg_proc_t proc, void* arg)
+{
+    return hg_proc_raft_message(proc, (struct raft_message*)arg);
+}
 
 #endif

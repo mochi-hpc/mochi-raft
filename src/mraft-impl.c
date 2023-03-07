@@ -41,7 +41,15 @@ int mraft_impl_init(struct raft_io *io, raft_id id, const char *address)
 void mraft_impl_close(struct raft_io *io, raft_io_close_cb cb)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->data;
-    // TODO
+    impl->recv_cb = NULL;
+    impl->tick_cb = NULL;
+    if(impl->tick_ult && impl->tick_ult != ABT_THREAD_NULL) {
+        ABT_thread_join(impl->tick_ult);
+        ABT_thread_free(&impl->tick_ult);
+        impl->tick_ult = ABT_THREAD_NULL;
+    }
+    margo_deregister(impl->mid, impl->send_rpc_id);
+    cb(io);
 }
 
 /* Load persisted state from storage.
@@ -154,7 +162,42 @@ int mraft_impl_send(struct raft_io *io,
                     raft_io_send_cb cb)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->data;
-    // TODO
+    hg_handle_t     h;
+    hg_return_t     hret;
+    hg_addr_t       addr = HG_ADDR_NULL;
+
+    req->cb = cb;
+
+    hret = margo_addr_lookup(impl->mid, message->server_address, &addr);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not resolve address %s: margo_addr_lookup returned %d",
+            message->server_address, hret);
+        cb(req, RAFT_CANCELED);
+        return MRAFT_ERR_FROM_MERCURY;
+    }
+
+    hret = margo_create(impl->mid, addr, impl->send_rpc_id, &h);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not create handle: margo_create returned %d", hret);
+        cb(req, RAFT_CANCELED);
+        return MRAFT_ERR_FROM_MERCURY;
+    }
+
+    hret = margo_provider_forward(impl->provider_id, h, (void*)message);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
+        cb(req, RAFT_CANCELED);
+        return MRAFT_ERR_FROM_MERCURY;
+    }
+
+    margo_destroy(h);
+
+    cb(req, 0);
+
+    return MRAFT_SUCCESS;
 }
 
 /* Asynchronously append the given entries to the log.
@@ -271,15 +314,15 @@ static DEFINE_MARGO_RPC_HANDLER(mraft_rpc_ult)
 static void mraft_rpc_ult(hg_handle_t h)
 {
     hg_return_t hret;
-    mraft_send_in_t in = {0};
+    struct raft_message msg = {0};
 
     margo_instance_id mid = margo_hg_handle_get_instance(h);
     const struct hg_info* info = margo_get_info(h);
     struct raft_io* io = (struct raft_io*)margo_registered_data(mid, info->id);
 
-    hret = margo_get_input(h, &in);
+    hret = margo_get_input(h, &msg);
     if(hret != HG_SUCCESS) {
-        margo_error(mid, "Could not deserialize output (mercury error %d)", hret);
+        margo_error(mid, "[mraft] Could not deserialize output (mercury error %d)", hret);
         margo_destroy(h);
         return;
     }
@@ -288,8 +331,8 @@ static void mraft_rpc_ult(hg_handle_t h)
 
     struct mraft_impl* impl = (struct mraft_impl*)io->data;
     raft_io_recv_cb recv_cb = impl->recv_cb;
-    if(recv_cb) recv_cb(io, &in.message);
+    if(recv_cb) recv_cb(io, &msg);
 
-    margo_free_input(h, &in);
+    margo_free_input(h, &msg);
     margo_destroy(h);
 }
