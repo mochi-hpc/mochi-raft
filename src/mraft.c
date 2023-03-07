@@ -39,8 +39,20 @@ int mraft_init(const struct mraft_init_args* args, struct raft_io* raft_io)
     if (!impl->pool || impl->pool == ABT_POOL_NULL)
         margo_get_handler_pool(args->mid, &impl->pool);
 
-    // FIXME: use a seed that depends on a hash of the address
-    pcg32_srandom_r(&impl->rng_state, 0x853c49e6748fea9bULL, 0xda3e39cb94b95bdbULL);
+    unsigned long long seed = 0x853c49e6748fea9bULL;
+    char addr_str[256];
+    hg_size_t addr_size = 256;
+    hg_addr_t self_addr = HG_ADDR_NULL;
+    margo_addr_self(impl->mid, &self_addr);
+    margo_addr_to_string(impl->mid, addr_str, &addr_size, self_addr);
+    margo_addr_free(impl->mid, self_addr);
+    const unsigned char* p = (const unsigned char*)addr_str;
+    while (*p != '\0') {
+        seed = (seed << 5) + seed + *p;
+        ++p;
+    }
+    seed |= 1;
+    pcg32_srandom_r(&impl->rng_state, seed, 0xda3e39cb94b95bdbULL);
 
     raft_io->data = impl;
     return MRAFT_SUCCESS;

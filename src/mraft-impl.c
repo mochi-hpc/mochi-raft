@@ -419,6 +419,7 @@ static void mraft_rpc_ult(hg_handle_t h)
     margo_instance_id mid = margo_hg_handle_get_instance(h);
     const struct hg_info* info = margo_get_info(h);
     struct raft_io* io = (struct raft_io*)margo_registered_data(mid, info->id);
+    struct mraft_impl* impl = (struct mraft_impl*)io->data;
 
     hret = margo_get_input(h, &msg);
     if(hret != HG_SUCCESS) {
@@ -427,12 +428,22 @@ static void mraft_rpc_ult(hg_handle_t h)
         return;
     }
 
-    // FIXME: set the id and address of the message
+    for(unsigned i=0; i < impl->servers.count; i++) {
+        if(margo_addr_cmp(mid, info->addr, impl->servers.hg_addr[i])) {
+            msg.server_address = impl->servers.str_addr[i];
+            msg.server_id      = impl->servers.ids[i];
+            break;
+        }
+    }
+    if(!msg.server_address) {
+        margo_warning(mid, "[mraft] Ignoring RPC received from an unknown server");
+        goto finish;
+    }
 
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
     raft_io_recv_cb recv_cb = impl->recv_cb;
     if(recv_cb) recv_cb(io, &msg);
 
+finish:
     margo_free_input(h, &msg);
     margo_destroy(h);
 }
