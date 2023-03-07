@@ -19,6 +19,27 @@ extern "C" {
 #define MRAFT_ERR_FROM_ARGOBOTS 3
 #define MRAFT_ERR_ID_USED       4
 
+
+/**
+ * @brief The mraft_log represents a custom implementation of a persistent log.
+ * The function pointers have the same meaning as in the raft_io structure,
+ * but their prototype may differ: asynchronous ones are made synchronous and
+ * thus do not have a callback and request. Asynchrony is handled by Argobots
+ * using ULTs posted to the pool provided to mraft_init.
+ */
+struct mraft_log {
+    void* data;
+    int (*load)(struct raft_io*, raft_term*, raft_id*, struct raft_snapshot**, raft_index*, struct raft_entry*[], size_t*);
+    int (*bootstrap)(struct raft_io*, const struct raft_configuration*);
+    int (*recover)(struct raft_io*, const struct raft_configuration*);
+    int (*set_term)(struct raft_io*, raft_term);
+    int (*set_vote)(struct raft_io*, raft_id);
+    int (*append)(struct raft_io*, const struct raft_entry[], unsigned);
+    int (*truncate)(struct raft_io*, raft_index);
+    int (*snapshot_put)(struct raft_io*, unsigned, const struct raft_snapshot*);
+    int (*snapshot_get)(struct raft_io*);
+};
+
 /**
  * @brief Structure containing all the arguments for initializing
  * a raft_io instance with a Mochi backend.
@@ -27,6 +48,7 @@ struct mraft_init_args {
     margo_instance_id mid;  /* Margo instance */
     ABT_pool          pool; /* Pool in which to execute RPCs */
     uint16_t          id;   /* Provider id */
+    struct mraft_log  log;  /* Log implementation */
 };
 
 /**
