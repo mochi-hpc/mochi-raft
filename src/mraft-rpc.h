@@ -169,8 +169,6 @@ static inline hg_return_t hg_proc_raft_message(hg_proc_t proc, struct raft_messa
 {
     hg_return_t ret = HG_SUCCESS;
     MRAFT_CHECK(hg_proc_uint16_t(proc, &msg->type));
-    MRAFT_CHECK(hg_proc_raft_id(proc, &msg->server_id));
-    MRAFT_CHECK(hg_proc_hg_const_string_t(proc, &msg->server_address));
     switch(msg->type) {
     case RAFT_IO_APPEND_ENTRIES:
         return hg_proc_raft_append_entries(proc, &msg->append_entries);
@@ -191,9 +189,6 @@ static inline hg_return_t hg_proc_raft_message(hg_proc_t proc, struct raft_messa
 typedef struct raft_message raft_message;
 
 MERCURY_GEN_PROC(mraft_send_in_t,
-    ((raft_message)(message)))
-
-MERCURY_GEN_PROC(mraft_send_out_t,
     ((raft_message)(message)))
 
 #endif

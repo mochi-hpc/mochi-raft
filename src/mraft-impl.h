@@ -10,9 +10,15 @@
 #include "mochi-raft.h"
 
 struct mraft_impl {
-    margo_instance_id mid;
-    ABT_pool          pool;
-    pcg32_random_t    rng_state;
+    margo_instance_id       mid;
+    ABT_pool                pool;
+    uint16_t                provider_id;
+    pcg32_random_t          rng_state;
+    hg_id_t                 send_rpc_id;
+    unsigned                tick_msec;
+    ABT_thread              tick_ult;
+    _Atomic raft_io_tick_cb tick_cb;
+    _Atomic raft_io_recv_cb recv_cb;
 };
 
 int mraft_impl_init(struct raft_io *io, raft_id id, const char *address);

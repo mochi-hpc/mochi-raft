@@ -13,7 +13,11 @@
 extern "C" {
 #endif
 
-#define MRAFT_SUCCESS 0
+#define MRAFT_SUCCESS           0
+#define MRAFT_ERR_INVALID_ARGS  1
+#define MRAFT_ERR_FROM_MERCURY  2
+#define MRAFT_ERR_FROM_ARGOBOTS 3
+#define MRAFT_ERR_ID_USED       4
 
 /**
  * @brief Structure containing all the arguments for initializing
