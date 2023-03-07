@@ -12,6 +12,41 @@
 static DECLARE_MARGO_RPC_HANDLER(mraft_rpc_ult)
 static void mraft_rpc_ult(hg_handle_t h);
 
+static inline void free_server_list(struct raft_io *io)
+{
+    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    for(unsigned i=0; i < impl->servers.count; i++) {
+        free(impl->servers.str_addr[i]);
+        margo_addr_free(impl->mid, impl->servers.hg_addr[i]);
+    }
+    free(impl->servers.ids);
+    free(impl->servers.str_addr);
+    free(impl->servers.hg_addr);
+}
+
+static inline int populate_server_list(struct raft_io *io, const struct raft_configuration *conf)
+{
+    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+
+    impl->servers.count    = conf->n;
+    impl->servers.ids      = calloc(conf->n, sizeof(*impl->servers.ids));
+    impl->servers.str_addr = calloc(conf->n, sizeof(*impl->servers.str_addr));
+    impl->servers.hg_addr  = calloc(conf->n, sizeof(*impl->servers.hg_addr));
+
+    for(unsigned i=0; i < conf->n; i++) {
+        impl->servers.ids[i]      = conf->servers[i].id;
+        impl->servers.str_addr[i] = strdup(conf->servers[i].address);
+        hg_return_t ret = margo_addr_lookup(impl->mid, conf->servers[i].address, &impl->servers.hg_addr[i]);
+        if(ret != HG_SUCCESS) goto error;
+    }
+
+    return MRAFT_SUCCESS;
+
+error:
+    free_server_list(io);
+    return RAFT_CANTBOOTSTRAP;
+}
+
 /* Initialize the backend with operational parameters such as server ID and address. */
 int mraft_impl_init(struct raft_io *io, raft_id id, const char *address)
 {
@@ -48,6 +83,7 @@ void mraft_impl_close(struct raft_io *io, raft_io_close_cb cb)
         impl->tick_ult = ABT_THREAD_NULL;
     }
     margo_deregister(impl->mid, impl->send_rpc_id);
+    free_server_list(io);
     cb(io);
 }
 
@@ -107,41 +143,6 @@ int mraft_impl_start(struct raft_io *io,
     int ret = ABT_thread_create(impl->pool, ticker_ult, io, ABT_THREAD_ATTR_NULL, &impl->tick_ult);
     if(ret != ABT_SUCCESS) return MRAFT_ERR_FROM_ARGOBOTS;
     return MRAFT_SUCCESS;
-}
-
-static inline void free_server_list(struct raft_io *io)
-{
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
-    for(unsigned i=0; i < impl->servers.count; i++) {
-        free(impl->servers.str_addr[i]);
-        margo_addr_free(impl->mid, impl->servers.hg_addr[i]);
-    }
-    free(impl->servers.ids);
-    free(impl->servers.str_addr);
-    free(impl->servers.hg_addr);
-}
-
-static inline int populate_server_list(struct raft_io *io, const struct raft_configuration *conf)
-{
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
-
-    impl->servers.count    = conf->n;
-    impl->servers.ids      = calloc(conf->n, sizeof(*impl->servers.ids));
-    impl->servers.str_addr = calloc(conf->n, sizeof(*impl->servers.str_addr));
-    impl->servers.hg_addr  = calloc(conf->n, sizeof(*impl->servers.hg_addr));
-
-    for(unsigned i=0; i < conf->n; i++) {
-        impl->servers.ids[i]      = conf->servers[i].id;
-        impl->servers.str_addr[i] = strdup(conf->servers[i].address);
-        hg_return_t ret = margo_addr_lookup(impl->mid, conf->servers[i].address, &impl->servers.hg_addr[i]);
-        if(ret != HG_SUCCESS) goto error;
-    }
-
-    return MRAFT_SUCCESS;
-
-error:
-    free_server_list(io);
-    return RAFT_CANTBOOTSTRAP;
 }
 
 /* Bootstrap a server belonging to a new cluster.
