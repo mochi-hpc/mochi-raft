@@ -20,6 +20,12 @@ struct mraft_impl {
     ABT_thread              tick_ult;
     _Atomic raft_io_tick_cb tick_cb;
     _Atomic raft_io_recv_cb recv_cb;
+    struct {
+        size_t     count;
+        raft_id*   ids;
+        char**     str_addr;
+        hg_addr_t* hg_addr;
+    } servers;
 };
 
 int mraft_impl_init(struct raft_io *io, raft_id id, const char *address);

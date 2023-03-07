@@ -109,6 +109,41 @@ int mraft_impl_start(struct raft_io *io,
     return MRAFT_SUCCESS;
 }
 
+static inline void free_server_list(struct raft_io *io)
+{
+    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    for(unsigned i=0; i < impl->servers.count; i++) {
+        free(impl->servers.str_addr[i]);
+        margo_addr_free(impl->mid, impl->servers.hg_addr[i]);
+    }
+    free(impl->servers.ids);
+    free(impl->servers.str_addr);
+    free(impl->servers.hg_addr);
+}
+
+static inline int populate_server_list(struct raft_io *io, const struct raft_configuration *conf)
+{
+    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+
+    impl->servers.count    = conf->n;
+    impl->servers.ids      = calloc(conf->n, sizeof(*impl->servers.ids));
+    impl->servers.str_addr = calloc(conf->n, sizeof(*impl->servers.str_addr));
+    impl->servers.hg_addr  = calloc(conf->n, sizeof(*impl->servers.hg_addr));
+
+    for(unsigned i=0; i < conf->n; i++) {
+        impl->servers.ids[i]      = conf->servers[i].id;
+        impl->servers.str_addr[i] = strdup(conf->servers[i].address);
+        hg_return_t ret = margo_addr_lookup(impl->mid, conf->servers[i].address, &impl->servers.hg_addr[i]);
+        if(ret != HG_SUCCESS) goto error;
+    }
+
+    return MRAFT_SUCCESS;
+
+error:
+    free_server_list(io);
+    return RAFT_CANTBOOTSTRAP;
+}
+
 /* Bootstrap a server belonging to a new cluster.
  *
  * The implementation must synchronously persist the given configuration as the
@@ -121,6 +156,11 @@ int mraft_impl_bootstrap(struct raft_io *io, const struct raft_configuration *co
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->data;
     if(!impl->log.bootstrap) return RAFT_NOTFOUND;
+    if(impl->servers.count != 0) return RAFT_CANTBOOTSTRAP;
+
+    int ret = populate_server_list(io, conf);
+    if(ret != 0) return ret;
+
     return (impl->log.bootstrap)(&impl->log, conf);
 }
 
@@ -129,6 +169,11 @@ int mraft_impl_recover(struct raft_io *io, const struct raft_configuration *conf
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->data;
     if(!impl->log.recover) return RAFT_NOTFOUND;
+
+    free_server_list(io);
+    int ret = populate_server_list(io, conf);
+    if(ret != 0) return ret;
+
     return (impl->log.recover)(&impl->log, conf);
 }
 
