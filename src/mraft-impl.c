@@ -22,6 +22,10 @@ static inline void free_server_list(struct raft_io *io)
     free(impl->servers.ids);
     free(impl->servers.str_addr);
     free(impl->servers.hg_addr);
+    impl->servers.count    = 0;
+    impl->servers.ids      = NULL;
+    impl->servers.str_addr = NULL;
+    impl->servers.hg_addr  = NULL;
 }
 
 static inline int populate_server_list(struct raft_io *io, const struct raft_configuration *conf)
