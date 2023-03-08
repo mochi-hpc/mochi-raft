@@ -55,12 +55,12 @@ int mraft_init(const struct mraft_init_args* args, struct raft_io* raft_io)
     seed |= 1;
     pcg32_srandom_r(&impl->rng_state, seed, 0xda3e39cb94b95bdbULL);
 
-    raft_io->data = impl;
+    raft_io->impl = impl;
     return MRAFT_SUCCESS;
 }
 
 int mraft_finalize(struct raft_io* raft_io)
 {
-    free(raft_io->data);
+    free(raft_io->impl);
     return MRAFT_SUCCESS;
 }

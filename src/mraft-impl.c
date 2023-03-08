@@ -14,7 +14,7 @@ static void mraft_rpc_ult(hg_handle_t h);
 
 static inline void free_server_list(struct raft_io *io)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
     for(unsigned i=0; i < impl->servers.count; i++) {
         free(impl->servers.str_addr[i]);
         margo_addr_free(impl->mid, impl->servers.hg_addr[i]);
@@ -30,7 +30,7 @@ static inline void free_server_list(struct raft_io *io)
 
 static inline int populate_server_list(struct raft_io *io, const struct raft_configuration *conf)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
 
     impl->servers.count    = conf->n;
     impl->servers.ids      = calloc(conf->n, sizeof(*impl->servers.ids));
@@ -56,7 +56,7 @@ int mraft_impl_init(struct raft_io *io, raft_id id, const char *address)
 {
     (void)id;
     (void)address;
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
 
     hg_bool_t flag;
     hg_id_t rpc_id;
@@ -80,7 +80,7 @@ int mraft_impl_init(struct raft_io *io, raft_id id, const char *address)
  */
 void mraft_impl_close(struct raft_io *io, raft_io_close_cb cb)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
     impl->recv_cb = NULL;
     impl->tick_cb = NULL;
     if(impl->tick_ult && impl->tick_ult != ABT_THREAD_NULL) {
@@ -90,7 +90,7 @@ void mraft_impl_close(struct raft_io *io, raft_io_close_cb cb)
     }
     margo_deregister(impl->mid, impl->send_rpc_id);
     free_server_list(io);
-    cb(io);
+    if(cb) cb(io);
 }
 
 /* Load persisted state from storage.
@@ -114,7 +114,7 @@ int mraft_impl_load(struct raft_io *io,
                     struct raft_entry *entries[],
                     size_t *n_entries)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
     if(!impl->log->load) return RAFT_NOTFOUND;
     return (impl->log->load)(impl->log, term, voted_for, snapshot, start_index, entries, n_entries);
 }
@@ -122,7 +122,7 @@ int mraft_impl_load(struct raft_io *io,
 static void ticker_ult(void* args)
 {
     struct raft_io* io = (struct raft_io*)args;
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
     raft_io_tick_cb tick = impl->tick_cb;
     do {
         tick(io);
@@ -142,7 +142,7 @@ int mraft_impl_start(struct raft_io *io,
                      raft_io_tick_cb tick,
                      raft_io_recv_cb recv)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
     impl->recv_cb           = recv;
     impl->tick_cb           = tick;
     impl->tick_msec         = msecs;
@@ -161,7 +161,7 @@ int mraft_impl_start(struct raft_io *io,
  */
 int mraft_impl_bootstrap(struct raft_io *io, const struct raft_configuration *conf)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
     if(!impl->log->bootstrap) return RAFT_NOTFOUND;
     if(impl->servers.count != 0) return RAFT_CANTBOOTSTRAP;
 
@@ -174,7 +174,7 @@ int mraft_impl_bootstrap(struct raft_io *io, const struct raft_configuration *co
 /* Force appending a new configuration as last entry of the log. */
 int mraft_impl_recover(struct raft_io *io, const struct raft_configuration *conf)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
     if(!impl->log->recover) return RAFT_NOTFOUND;
     free_server_list(io);
     int ret = populate_server_list(io, conf);
@@ -189,7 +189,7 @@ int mraft_impl_recover(struct raft_io *io, const struct raft_configuration *conf
  */
 int mraft_impl_set_term(struct raft_io *io, raft_term term)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
     if(!impl->log->set_term) return RAFT_NOTFOUND;
     return (impl->log->set_term)(impl->log, term);
 }
@@ -200,7 +200,7 @@ int mraft_impl_set_term(struct raft_io *io, raft_term term)
  */
 int mraft_impl_set_vote(struct raft_io *io, raft_id server_id)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
     if(!impl->log->set_vote) return RAFT_NOTFOUND;
     return (impl->log->set_vote)(impl->log, server_id);
 }
@@ -215,7 +215,7 @@ int mraft_impl_send(struct raft_io *io,
                     const struct raft_message *message,
                     raft_io_send_cb cb)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
     hg_handle_t     h;
     hg_return_t     hret;
     hg_addr_t       addr = HG_ADDR_NULL;
@@ -227,7 +227,7 @@ int mraft_impl_send(struct raft_io *io,
         margo_error(impl->mid,
             "[mraft] Could not resolve address %s: margo_addr_lookup returned %d",
             message->server_address, hret);
-        cb(req, RAFT_CANCELED);
+        if(cb) cb(req, RAFT_CANCELED);
         return MRAFT_ERR_FROM_MERCURY;
     }
 
@@ -235,7 +235,7 @@ int mraft_impl_send(struct raft_io *io,
     if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could not create handle: margo_create returned %d", hret);
-        cb(req, RAFT_CANCELED);
+        if(cb) cb(req, RAFT_CANCELED);
         return MRAFT_ERR_FROM_MERCURY;
     }
 
@@ -243,13 +243,13 @@ int mraft_impl_send(struct raft_io *io,
     if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
-        cb(req, RAFT_CANCELED);
+        if(cb) cb(req, RAFT_CANCELED);
         return MRAFT_ERR_FROM_MERCURY;
     }
 
     margo_destroy(h);
 
-    cb(req, 0);
+    if(cb) cb(req, 0);
 
     return MRAFT_SUCCESS;
 }
@@ -264,10 +264,10 @@ struct append_args {
 static void append_ult(void* x)
 {
     struct append_args* args = (struct append_args*)x;
-    struct mraft_impl* impl = (struct mraft_impl*)args->io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)args->io->impl;
     int status = impl->log->append ?
         (impl->log->append)(impl->log, args->entries, args->n) : RAFT_IOERR;
-    (args->req->cb)(args->req, status);
+    if(args->req->cb) (args->req->cb)(args->req, status);
     free(args);
 }
 
@@ -282,7 +282,7 @@ int mraft_impl_append(struct raft_io *io,
                       unsigned n,
                       raft_io_append_cb cb)
 {
-    struct mraft_impl* impl  = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl  = (struct mraft_impl*)io->impl;
     struct append_args* args = (struct append_args*)calloc(1, sizeof(*args));
     args->io                 = io;
     args->req                = req;
@@ -300,7 +300,7 @@ struct truncate_args {
 static void truncate_ult(void* x)
 {
     struct truncate_args* args = (struct truncate_args*)x;
-    struct mraft_impl* impl = (struct mraft_impl*)args->io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)args->io->impl;
     if(impl->log->truncate)
         (impl->log->truncate)(impl->log, args->index);
     free(args);
@@ -309,7 +309,7 @@ static void truncate_ult(void* x)
 /* Asynchronously truncate all log entries from the given index onwards. */
 int mraft_impl_truncate(struct raft_io *io, raft_index index)
 {
-    struct mraft_impl* impl    = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl    = (struct mraft_impl*)io->impl;
     struct truncate_args* args = (struct truncate_args*)calloc(1, sizeof(*args));
     args->io                   = io;
     args->index                = index;
@@ -326,10 +326,10 @@ struct snapshot_put_args {
 static void snapshot_put_ult(void* x)
 {
     struct snapshot_put_args* args = (struct snapshot_put_args*)x;
-    struct mraft_impl* impl = (struct mraft_impl*)args->io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)args->io->impl;
     int status = impl->log->snapshot_put ?
         (impl->log->snapshot_put)(impl->log, args->trailing, args->snapshot) : RAFT_IOERR;
-    (args->req->cb)(args->req, status);
+    if(args->req->cb) (args->req->cb)(args->req, status);
     free(args);
 }
 
@@ -348,7 +348,7 @@ int mraft_impl_snapshot_put(struct raft_io *io,
                             const struct raft_snapshot *snapshot,
                             raft_io_snapshot_put_cb cb)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
     req->cb = cb;
     struct snapshot_put_args* args = (struct snapshot_put_args*)calloc(1, sizeof(*args));
     args->io       = io;
@@ -366,7 +366,7 @@ struct snapshot_get_args {
 static void snapshot_get_ult(void* x)
 {
     struct snapshot_get_args* args = (struct snapshot_get_args*)x;
-    struct mraft_impl* impl = (struct mraft_impl*)args->io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)args->io->impl;
     if(impl->log->snapshot_get)
         (impl->log->snapshot_get)(impl->log, args->req, args->req->cb);
     free(args);
@@ -377,7 +377,7 @@ int mraft_impl_snapshot_get(struct raft_io *io,
                             struct raft_io_snapshot_get *req,
                             raft_io_snapshot_get_cb cb)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
     req->cb = cb;
     struct snapshot_get_args* args = (struct snapshot_get_args*)calloc(1, sizeof(*args));
     args->io  = io;
@@ -394,7 +394,7 @@ raft_time mraft_impl_time(struct raft_io *io)
 /* Generate a random integer between min and max. */
 int mraft_impl_random(struct raft_io *io, int min, int max)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
     return min + pcg32_boundedrand_r(&impl->rng_state, max-min);
 }
 
@@ -402,7 +402,7 @@ static void async_work_ult(void* args)
 {
     struct raft_io_async_work *req = (struct raft_io_async_work*)args;
     int status = req->work(req);
-    req->cb(req, status);
+    if(req->cb) req->cb(req, status);
 }
 
 /* Submit work to be completed asynchronously */
@@ -410,7 +410,7 @@ int mraft_impl_async_work(struct raft_io *io,
                           struct raft_io_async_work *req,
                           raft_io_async_work_cb cb)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
     req->cb = cb;
     return ABT_thread_create(impl->pool, async_work_ult, req, ABT_THREAD_ATTR_NULL, NULL);
 }
@@ -424,7 +424,7 @@ static void mraft_rpc_ult(hg_handle_t h)
     margo_instance_id mid = margo_hg_handle_get_instance(h);
     const struct hg_info* info = margo_get_info(h);
     struct raft_io* io = (struct raft_io*)margo_registered_data(mid, info->id);
-    struct mraft_impl* impl = (struct mraft_impl*)io->data;
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
 
     hret = margo_get_input(h, &msg);
     if(hret != HG_SUCCESS) {
