@@ -54,6 +54,8 @@ error:
 /* Initialize the backend with operational parameters such as server ID and address. */
 int mraft_impl_init(struct raft_io *io, raft_id id, const char *address)
 {
+    (void)id;
+    (void)address;
     struct mraft_impl* impl = (struct mraft_impl*)io->data;
 
     hg_bool_t flag;
@@ -113,8 +115,8 @@ int mraft_impl_load(struct raft_io *io,
                     size_t *n_entries)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->data;
-    if(!impl->log.load) return RAFT_NOTFOUND;
-    return (impl->log.load)(&impl->log, term, voted_for, snapshot, start_index, entries, n_entries);
+    if(!impl->log->load) return RAFT_NOTFOUND;
+    return (impl->log->load)(impl->log, term, voted_for, snapshot, start_index, entries, n_entries);
 }
 
 static void ticker_ult(void* args)
@@ -160,26 +162,24 @@ int mraft_impl_start(struct raft_io *io,
 int mraft_impl_bootstrap(struct raft_io *io, const struct raft_configuration *conf)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->data;
-    if(!impl->log.bootstrap) return RAFT_NOTFOUND;
+    if(!impl->log->bootstrap) return RAFT_NOTFOUND;
     if(impl->servers.count != 0) return RAFT_CANTBOOTSTRAP;
 
     int ret = populate_server_list(io, conf);
     if(ret != 0) return ret;
 
-    return (impl->log.bootstrap)(&impl->log, conf);
+    return (impl->log->bootstrap)(impl->log, conf);
 }
 
 /* Force appending a new configuration as last entry of the log. */
 int mraft_impl_recover(struct raft_io *io, const struct raft_configuration *conf)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->data;
-    if(!impl->log.recover) return RAFT_NOTFOUND;
-
+    if(!impl->log->recover) return RAFT_NOTFOUND;
     free_server_list(io);
     int ret = populate_server_list(io, conf);
     if(ret != 0) return ret;
-
-    return (impl->log.recover)(&impl->log, conf);
+    return (impl->log->recover)(impl->log, conf);
 }
 
 /* Synchronously persist current term (and nil vote).
@@ -190,8 +190,8 @@ int mraft_impl_recover(struct raft_io *io, const struct raft_configuration *conf
 int mraft_impl_set_term(struct raft_io *io, raft_term term)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->data;
-    if(!impl->log.set_term) return RAFT_NOTFOUND;
-    return (impl->log.set_term)(&impl->log, term);
+    if(!impl->log->set_term) return RAFT_NOTFOUND;
+    return (impl->log->set_term)(impl->log, term);
 }
 
 /* Synchronously persist who we voted for.
@@ -201,8 +201,8 @@ int mraft_impl_set_term(struct raft_io *io, raft_term term)
 int mraft_impl_set_vote(struct raft_io *io, raft_id server_id)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->data;
-    if(!impl->log.set_vote) return RAFT_NOTFOUND;
-    return (impl->log.set_vote)(&impl->log, server_id);
+    if(!impl->log->set_vote) return RAFT_NOTFOUND;
+    return (impl->log->set_vote)(impl->log, server_id);
 }
 
 /* Asynchronously send an RPC message.
@@ -265,8 +265,8 @@ static void append_ult(void* x)
 {
     struct append_args* args = (struct append_args*)x;
     struct mraft_impl* impl = (struct mraft_impl*)args->io->data;
-    int status = impl->log.append ?
-        (impl->log.append)(&impl->log, args->entries, args->n) : RAFT_IOERR;
+    int status = impl->log->append ?
+        (impl->log->append)(impl->log, args->entries, args->n) : RAFT_IOERR;
     (args->req->cb)(args->req, status);
     free(args);
 }
@@ -301,8 +301,8 @@ static void truncate_ult(void* x)
 {
     struct truncate_args* args = (struct truncate_args*)x;
     struct mraft_impl* impl = (struct mraft_impl*)args->io->data;
-    if(impl->log.truncate)
-        (impl->log.truncate)(&impl->log, args->index);
+    if(impl->log->truncate)
+        (impl->log->truncate)(impl->log, args->index);
     free(args);
 }
 
@@ -327,8 +327,8 @@ static void snapshot_put_ult(void* x)
 {
     struct snapshot_put_args* args = (struct snapshot_put_args*)x;
     struct mraft_impl* impl = (struct mraft_impl*)args->io->data;
-    int status = impl->log.snapshot_put ?
-        (impl->log.snapshot_put)(&impl->log, args->trailing, args->snapshot) : RAFT_IOERR;
+    int status = impl->log->snapshot_put ?
+        (impl->log->snapshot_put)(impl->log, args->trailing, args->snapshot) : RAFT_IOERR;
     (args->req->cb)(args->req, status);
     free(args);
 }
@@ -367,8 +367,8 @@ static void snapshot_get_ult(void* x)
 {
     struct snapshot_get_args* args = (struct snapshot_get_args*)x;
     struct mraft_impl* impl = (struct mraft_impl*)args->io->data;
-    if(impl->log.snapshot_get)
-        (impl->log.snapshot_get)(&impl->log, args->req, args->req->cb);
+    if(impl->log->snapshot_get)
+        (impl->log->snapshot_get)(impl->log, args->req, args->req->cb);
     free(args);
 }
 

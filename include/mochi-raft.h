@@ -50,7 +50,7 @@ struct mraft_init_args {
     margo_instance_id mid;  /* Margo instance */
     ABT_pool          pool; /* Pool in which to execute RPCs */
     uint16_t          id;   /* Provider id */
-    struct mraft_log  log;  /* Log implementation */
+    struct mraft_log* log;  /* Log implementation */
 };
 
 /**

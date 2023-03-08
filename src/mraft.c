@@ -9,8 +9,9 @@
 
 int mraft_init(const struct mraft_init_args* args, struct raft_io* raft_io)
 {
-    if (!args) return -1;
-    if (args->mid == MARGO_INSTANCE_NULL) return -1;
+    if (!args) return RAFT_INVALID;
+    if (args->mid == MARGO_INSTANCE_NULL) return RAFT_INVALID;
+    if (!args->log) return RAFT_INVALID;
 
     memset(raft_io, 0, sizeof(*raft_io));
     raft_io->version = 2;

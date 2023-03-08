@@ -14,7 +14,7 @@ struct mraft_impl {
     ABT_pool                pool;
     uint16_t                provider_id;
     pcg32_random_t          rng_state;
-    struct mraft_log        log;
+    struct mraft_log*       log;
     hg_id_t                 send_rpc_id;
     unsigned                tick_msec;
     ABT_thread              tick_ult;
