@@ -39,7 +39,7 @@ struct mraft_log {
     int (*append)(struct mraft_log*, const struct raft_entry[], unsigned);
     int (*truncate)(struct mraft_log*, raft_index);
     int (*snapshot_put)(struct mraft_log*, unsigned, const struct raft_snapshot*);
-    int (*snapshot_get)(struct mraft_log*, struct raft_io_snapshot_get* req, raft_io_snapshot_get_cb cb);
+    int (*snapshot_get)(struct mraft_log*, struct raft_io_snapshot_get*, raft_io_snapshot_get_cb);
 };
 
 /**
