@@ -28,14 +28,22 @@ static int memory_log_load(
     raft_index* start_index, struct raft_entry* entries[],
     size_t* n_entries)
 {
-    (void)log;
-    (void)term;
-    (void)voted_for;
-    (void)snapshot;
-    (void)start_index;
-    (void)entries;
-    (void)n_entries;
-    return RAFT_NOTFOUND;
+    struct memory_log* mlog = (struct memory_log*)log->data;
+    *term        = mlog->term;
+    *start_index = 1;
+    *voted_for   = mlog->voted_for;
+    *n_entries   = mlog->entries.count;
+    *entries     = raft_malloc((*n_entries)*sizeof(**entries));
+    *snapshot    = NULL;
+    for(unsigned i = 0; i < *n_entries; i++) {
+        (*entries)[i].batch = NULL;
+        (*entries)[i].term = mlog->entries.array[i].term;
+        (*entries)[i].type = mlog->entries.array[i].type;
+        (*entries)[i].buf.len = mlog->entries.array[i].buf.len;
+        (*entries)[i].buf.base = raft_malloc((*entries)[i].buf.len);
+        memcpy((*entries)[i].buf.base, mlog->entries.array[i].buf.base, (*entries)[i].buf.len);
+    }
+    return 0;
 }
 
 static int memory_log_bootstrap(
@@ -71,6 +79,7 @@ static int memory_log_set_term(
 {
     struct memory_log* mlog = (struct memory_log*)log->data;
     mlog->term = term;
+    mlog->voted_for = 0;
     return 0;
 }
 

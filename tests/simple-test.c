@@ -16,6 +16,7 @@ static int myfsm_apply(struct raft_fsm *fsm,
                 void** result)
 {
     struct myfsm* myfsm = (struct myfsm*)fsm->data;
+    fprintf(stderr, "[test] Applying %s\n", (char*)buf->base);
     if(!myfsm->content) {
         myfsm->content = strdup((char*)buf->base);
     } else {
@@ -46,31 +47,27 @@ static int myfsm_restore(struct raft_fsm *fsm, struct raft_buffer *buf)
     return 0;
 }
 
-static void my_membership_update_cb(void* uargs,
-        ssg_member_id_t member_id,
-        ssg_member_update_type_t update_type)
+static void tracer_emit(struct raft_tracer *t,
+                        const char *file,
+                        int line,
+                        const char *message)
 {
-    switch(update_type) {
-    case SSG_MEMBER_JOINED:
-        printf("Member %ld joined\n", member_id);
-        break;
-    case SSG_MEMBER_LEFT:
-        printf("Member %ld left\n", member_id);
-        break;
-    case SSG_MEMBER_DIED:
-        printf("Member %ld died\n", member_id);
-        break;
-    }
+    margo_instance_id mid = (margo_instance_id)t->impl;
+    margo_trace(mid, "[trace] [%s:%d] %s", file, line, message);
 }
 
 int main(int argc, char** argv)
 {
     /* Initialize MPI */
     MPI_Init(&argc, &argv);
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
     /* Initialize Margo */
-    margo_instance_id mid = margo_init("na+sm", MARGO_SERVER_MODE, 1, 0);
+    margo_instance_id mid = margo_init("na+sm", MARGO_SERVER_MODE, 1, 1);
     assert(mid);
+
+    margo_set_log_level(mid, MARGO_LOG_TRACE);
 
     /* Initialize SSG */
     int ret = ssg_init();
@@ -87,7 +84,7 @@ int main(int argc, char** argv)
     ssg_group_id_t gid;
     ret = ssg_group_create_mpi(
             mid, "mygroup", MPI_COMM_WORLD,
-            &config, my_membership_update_cb, NULL, &gid);
+            &config, NULL, NULL, &gid);
     assert(ret == SSG_SUCCESS);
 
     /* Get this process' address and ID */
@@ -101,10 +98,10 @@ int main(int argc, char** argv)
     margo_addr_free(mid, self_hg_addr);
 
     /* Initialize the state machine */
-    struct myfsm* myfsm = calloc(1, sizeof(*myfsm));
+    struct myfsm myfsm = {0};
     struct raft_fsm raft_fsm = {
         .version = 1,
-        .data = myfsm,
+        .data = &myfsm,
         .apply = myfsm_apply,
         .snapshot = myfsm_snapshot,
         .restore = myfsm_restore,
@@ -131,6 +128,14 @@ int main(int argc, char** argv)
     ret = raft_init(&raft, &raft_io, &raft_fsm, self_id, self_addr);
     assert(ret == 0);
 
+    /* Initialize RAFT tracer */
+    struct raft_tracer tracer = {
+        .impl = (void*)mid,
+        .enabled = true,
+        .emit = tracer_emit
+    };
+    raft.tracer = &tracer;
+
     /* Bootstrap RAFT from SSG members */
     struct raft_configuration conf = {0};
     raft_configuration_init(&conf);
@@ -147,11 +152,25 @@ int main(int argc, char** argv)
     assert(ret == 0);
     raft_configuration_close(&conf);
 
+    raft_set_pre_vote(&raft, true);
+
     /* Start RAFT */
     ret = raft_start(&raft);
     assert(ret == 0);
 
-    // TODO
+    /* Start sending to the state machine */
+    srand(rank);
+    for(unsigned i=0; i < 32; i++) {
+        char c = 'A' + rank;
+        char msg[5] = {c,c,c,c,'\0'};
+        struct raft_buffer buf = {.base = msg, .len = 5};
+        struct raft_apply apply = {0};
+        fprintf(stderr, "[test] Sending %s\n", msg);
+        ret = raft_apply(&raft, &apply, &buf, 1, NULL);
+        assert(ret == 0);
+        int delay_ms = random() % 500;
+        margo_thread_sleep(mid, delay_ms);
+    }
 
     /* Finalize RAFT */
     raft_close(&raft, NULL);
@@ -164,8 +183,7 @@ int main(int argc, char** argv)
     memory_log_free(log);
 
     /* Finalize the state machine */
-    free(myfsm->content);
-    free(myfsm);
+    free(myfsm.content);
 
     /* Finalize SSG */
     ret = ssg_group_destroy(gid);
