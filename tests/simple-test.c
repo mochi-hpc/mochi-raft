@@ -7,6 +7,14 @@
 #include <mochi-raft.h>
 #include "memory-log.h"
 
+#define margo_assert(__mid__, __expr__) \
+    do { \
+        if(!(__expr__)) { \
+            margo_critical(__mid__, "[test] assert failed at %s line %d: " #__expr__, __FILE__, __LINE__); \
+            exit(-1); \
+        } \
+    } while(0)
+
 struct myfsm {
     char* content;
 };
@@ -43,6 +51,8 @@ static int myfsm_restore(struct raft_fsm *fsm, struct raft_buffer *buf)
 {
     struct myfsm* myfsm = (struct myfsm*)fsm->data;
     free(myfsm->content);
+    if(!buf || !buf->len)
+        return 0;
     myfsm->content = strdup((char*)buf->base);
     return 0;
 }
@@ -53,7 +63,7 @@ static void tracer_emit(struct raft_tracer *t,
                         const char *message)
 {
     margo_instance_id mid = (margo_instance_id)t->impl;
-    margo_trace(mid, "[trace] [%s:%d] %s", file, line, message);
+    margo_debug(mid, "[craft] [%s:%d] %s", file, line, message);
 }
 
 int main(int argc, char** argv)
@@ -65,19 +75,19 @@ int main(int argc, char** argv)
 
     /* Initialize Margo */
     margo_instance_id mid = margo_init("na+sm", MARGO_SERVER_MODE, 1, 1);
-    assert(mid);
+    margo_assert(mid, mid);
 
     margo_set_log_level(mid, MARGO_LOG_TRACE);
 
     /* Initialize SSG */
     int ret = ssg_init();
-    assert(ret == SSG_SUCCESS);
+    margo_assert(mid, ret == SSG_SUCCESS);
 
     ssg_group_config_t config = {
         .swim_period_length_ms = 1000,
         .swim_suspect_timeout_periods = 5,
         .swim_subgroup_member_count = -1,
-        .swim_disabled = 0,
+        .swim_disabled = 1,
         .ssg_credential = -1
     };
 
@@ -85,7 +95,7 @@ int main(int argc, char** argv)
     ret = ssg_group_create_mpi(
             mid, "mygroup", MPI_COMM_WORLD,
             &config, NULL, NULL, &gid);
-    assert(ret == SSG_SUCCESS);
+    margo_assert(mid, ret == SSG_SUCCESS);
 
     /* Get this process' address and ID */
     ssg_member_id_t self_id;
@@ -121,12 +131,12 @@ int main(int argc, char** argv)
     };
     struct raft_io raft_io;
     ret = mraft_init(&mraft_init_args, &raft_io);
-    assert(ret == 0);
+    margo_assert(mid, ret == 0);
 
     /* Initialize RAFT */
     struct raft raft;
     ret = raft_init(&raft, &raft_io, &raft_fsm, self_id, self_addr);
-    assert(ret == 0);
+    margo_assert(mid, ret == 0);
 
     /* Initialize RAFT tracer */
     struct raft_tracer tracer = {
@@ -144,40 +154,58 @@ int main(int argc, char** argv)
     for(unsigned i = 0; i < group_size; i++) {
         ssg_member_id_t member_id = 0;
         char* address = NULL;
-        ssg_get_group_member_id_from_rank(gid, i, &member_id);
+        ret = ssg_get_group_member_id_from_rank(gid, i, &member_id);
+        margo_assert(mid, ret == 0);
         ssg_get_group_member_addr_str(gid, member_id, &address);
+        margo_assert(mid, ret == 0);
         raft_configuration_add(&conf, member_id, address, RAFT_VOTER);
+        margo_trace(mid, "[test] Added %s with member id %lu to configuration",
+                    address, member_id);
     }
     ret = raft_bootstrap(&raft,&conf);
-    assert(ret == 0);
+    margo_assert(mid, ret == 0);
+    margo_assert(mid, conf.n == group_size);
     raft_configuration_close(&conf);
-
-    raft_set_pre_vote(&raft, true);
-
+    //raft_set_pre_vote(&raft, true);
+    fprintf(stderr, "============= Bootstrap done ============\n");
     /* Start RAFT */
     ret = raft_start(&raft);
-    assert(ret == 0);
+    margo_assert(mid, ret == 0);
+    fprintf(stderr, "============= Start done ============\n");
+
+    margo_thread_sleep(mid, 2000);
+
+    fprintf(stderr, "============= Starting to work ============\n");
+    raft_id leader_id;
+    const char* leader_addr;
+    raft_leader(&raft, &leader_id, &leader_addr);
+    margo_trace(mid, "[raft] Leader is %lu, state is %d\n", leader_id, raft_state(&raft));
 
     /* Start sending to the state machine */
-    srand(rank);
-    for(unsigned i=0; i < 32; i++) {
+    srand(rank+1);
+    if(raft_state(&raft) == RAFT_LEADER) {
+    for(unsigned i=0; i < 1; i++) {
         char c = 'A' + rank;
-        char msg[5] = {c,c,c,c,'\0'};
+        char* msg = raft_calloc(5, 1);
+        sprintf(msg, "%c%03d", 'A'+rank, i);
         struct raft_buffer buf = {.base = msg, .len = 5};
         struct raft_apply apply = {0};
         fprintf(stderr, "[test] Sending %s\n", msg);
         ret = raft_apply(&raft, &apply, &buf, 1, NULL);
-        assert(ret == 0);
+        margo_assert(mid, ret == 0);
         int delay_ms = random() % 500;
         margo_thread_sleep(mid, delay_ms);
     }
+    }
+    margo_thread_sleep(mid, 2000);
+    MPI_Barrier(MPI_COMM_WORLD);
 
     /* Finalize RAFT */
     raft_close(&raft, NULL);
 
     /* Finalize raft_io backend */
     ret = mraft_finalize(&raft_io);
-    assert(ret == 0);
+    margo_assert(mid, ret == 0);
 
     /* Finalize the log */
     memory_log_free(log);
@@ -187,10 +215,10 @@ int main(int argc, char** argv)
 
     /* Finalize SSG */
     ret = ssg_group_destroy(gid);
-    assert(ret == SSG_SUCCESS);
+    margo_assert(mid, ret == SSG_SUCCESS);
 
     ret = ssg_finalize();
-    assert(ret == SSG_SUCCESS);
+    margo_assert(mid, ret == SSG_SUCCESS);
 
     /* Finalize Margo */
     margo_finalize(mid);

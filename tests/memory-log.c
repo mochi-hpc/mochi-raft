@@ -43,6 +43,29 @@ static int memory_log_load(
         (*entries)[i].buf.base = raft_malloc((*entries)[i].buf.len);
         memcpy((*entries)[i].buf.base, mlog->entries.array[i].buf.base, (*entries)[i].buf.len);
     }
+    struct raft_snapshot* snap = (struct raft_snapshot*)raft_calloc(1, sizeof(*snap));
+    snap->index                = mlog->last_snapshot.index;
+    snap->term                 = mlog->last_snapshot.term;
+    snap->configuration_index  = mlog->last_snapshot.configuration_index;
+    snap->n_bufs               = mlog->last_snapshot.n_bufs;
+    snap->bufs = snap->n_bufs ? raft_calloc(snap->n_bufs, sizeof(*snap->bufs)) : NULL;
+    for(unsigned i = 0; i < snap->n_bufs; i++) {
+        snap->bufs[i].len = mlog->last_snapshot.bufs[i].len;
+        snap->bufs[i].base = raft_malloc(snap->bufs[i].len);
+        memcpy(snap->bufs[i].base, mlog->last_snapshot.bufs[i].base, snap->bufs[i].len);
+    }
+    snap->configuration.n       = mlog->last_snapshot.configuration.n;
+    snap->configuration.servers = mlog->last_snapshot.configuration.n ?
+        raft_calloc(snap->configuration.n, sizeof(*snap->configuration.servers)) : NULL;
+    for(unsigned i = 0; i < snap->configuration.n; i++) {
+        snap->configuration.servers[i].id = mlog->last_snapshot.configuration.servers[i].id;
+        snap->configuration.servers[i].role = mlog->last_snapshot.configuration.servers[i].role;
+        snap->configuration.servers[i].address =
+            raft_calloc(strlen(mlog->last_snapshot.configuration.servers[i].address)+1, 1);
+        strcpy(snap->configuration.servers[i].address,
+               mlog->last_snapshot.configuration.servers[i].address);
+    }
+    *snapshot = snap;
     return 0;
 }
 
@@ -56,7 +79,19 @@ static int memory_log_bootstrap(
     mlog->entries.capacity = 1;
     mlog->entries.count    = 1;
     struct raft_entry* last = mlog->entries.array;
+    last->type = RAFT_CHANGE;
     raft_configuration_encode(conf, &last->buf);
+    mlog->last_snapshot.index               = 0;
+    mlog->last_snapshot.term                = 1;
+    mlog->last_snapshot.configuration_index = 0;
+    mlog->last_snapshot.n_bufs              = 1;
+    mlog->last_snapshot.bufs                = raft_calloc(1, sizeof(*mlog->last_snapshot.bufs));
+    mlog->last_snapshot.bufs[0].len         = 0;
+    raft_configuration_init(&mlog->last_snapshot.configuration);
+    for(unsigned i=0; i < conf->n; i++) {
+        raft_configuration_add(&mlog->last_snapshot.configuration,
+            conf->servers[i].id, conf->servers[i].address, conf->servers[i].role);
+    }
     return 0;
 }
 
@@ -148,14 +183,20 @@ static int memory_log_snapshot_put(
         mlog->last_snapshot.configuration.servers[i].role =
             snapshot->configuration.servers[i].role;
     }
-    mlog->last_snapshot.n_bufs = snapshot->n_bufs;
-    mlog->last_snapshot.bufs = calloc(mlog->last_snapshot.n_bufs, sizeof(*mlog->last_snapshot.bufs));
-    for(unsigned i=0; i < mlog->last_snapshot.n_bufs; i++) {
-        mlog->last_snapshot.bufs[i].len = snapshot->bufs[i].len;
-        mlog->last_snapshot.bufs[i].base = raft_malloc(snapshot->bufs[i].len);
-        memcpy(mlog->last_snapshot.bufs[i].base,
-               snapshot->bufs[i].base,
-               snapshot->bufs[i].len);
+    mlog->last_snapshot.n_bufs = snapshot->n_bufs ? 1 : 0;
+    if(!mlog->last_snapshot.n_bufs) return 0;
+    size_t buf_size = 0;
+    for(unsigned i = 0; i < snapshot->n_bufs; i++) {
+        buf_size += snapshot->bufs[i].len;
+    }
+    mlog->last_snapshot.bufs = raft_calloc(1, sizeof(*mlog->last_snapshot.bufs));
+    mlog->last_snapshot.bufs[0].base = raft_calloc(1, buf_size);
+    mlog->last_snapshot.bufs[0].len  = buf_size;
+    size_t offset = 0;
+    for(unsigned i=0; i < snapshot->n_bufs; i++) {
+        memcpy((char*)mlog->last_snapshot.bufs[0].base + offset,
+               snapshot->bufs[i].base, snapshot->bufs[i].len);
+        offset += snapshot->bufs[i].len;
     }
     return 0;
 }
@@ -165,9 +206,30 @@ static int memory_log_snapshot_get(
         struct raft_io_snapshot_get* req, raft_io_snapshot_get_cb cb)
 {
     struct memory_log* mlog = (struct memory_log*)log->data;
-    int status = 0;
-    if(mlog->last_snapshot.index == 0) status = RAFT_NOTFOUND;
-    cb(req, &mlog->last_snapshot, status);
+    struct raft_snapshot* snap = (struct raft_snapshot*)raft_calloc(1, sizeof(*snap));
+    snap->index                = mlog->last_snapshot.index;
+    snap->term                 = mlog->last_snapshot.term;
+    snap->configuration_index  = mlog->last_snapshot.configuration_index;
+    snap->n_bufs               = mlog->last_snapshot.n_bufs;
+    snap->bufs = snap->n_bufs ? raft_calloc(snap->n_bufs, sizeof(*snap->bufs)) : NULL;
+    // note: technically n_bufs is always 0 or 1 because of the way memory_log_snapshot_put works
+    for(unsigned i = 0; i < snap->n_bufs; i++) {
+        snap->bufs[i].len = mlog->last_snapshot.bufs[i].len;
+        snap->bufs[i].base = raft_malloc(snap->bufs[i].len);
+        memcpy(snap->bufs[i].base, mlog->last_snapshot.bufs[i].base, snap->bufs[i].len);
+    }
+    snap->configuration.n       = mlog->last_snapshot.configuration.n;
+    snap->configuration.servers = mlog->last_snapshot.configuration.n ?
+        raft_calloc(snap->configuration.n, sizeof(*snap->configuration.servers)) : NULL;
+    for(unsigned i = 0; i < snap->configuration.n; i++) {
+        snap->configuration.servers[i].id = mlog->last_snapshot.configuration.servers[i].id;
+        snap->configuration.servers[i].role = mlog->last_snapshot.configuration.servers[i].role;
+        snap->configuration.servers[i].address =
+            raft_calloc(strlen(mlog->last_snapshot.configuration.servers[i].address)+1, 1);
+        strcpy(snap->configuration.servers[i].address,
+               mlog->last_snapshot.configuration.servers[i].address);
+    }
+    cb(req, snap, 0);
     return 0;
 }
 
@@ -200,10 +262,7 @@ void memory_log_free(struct mraft_log* log)
         free(mlog->last_snapshot.bufs[i].base);
     }
     free(mlog->last_snapshot.bufs);
-    for(unsigned i=0; i < mlog->last_snapshot.configuration.n; i++) {
-        free(mlog->last_snapshot.configuration.servers->address);
-    }
-    free(mlog->last_snapshot.configuration.servers);
+    raft_configuration_close(&mlog->last_snapshot.configuration);
     free(mlog);
     free(log);
 }

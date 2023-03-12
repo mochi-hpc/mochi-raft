@@ -30,13 +30,13 @@ static inline hg_return_t hg_proc_raft_buffer(hg_proc_t proc, struct raft_buffer
     MRAFT_CHECK(hg_proc_hg_size_t(proc, &buf->len));
     switch(hg_proc_get_op(proc)) {
     case HG_DECODE:
-        buf->base = calloc(1, buf->len);
+        buf->base = raft_calloc(1, buf->len);
         /* fall through */
     case HG_ENCODE:
         MRAFT_CHECK(hg_proc_memcpy(proc, buf->base, buf->len));
         break;
     case HG_FREE:
-        free(buf->base);
+        raft_free(buf->base);
         buf->len = 0;
         buf->base = NULL;
         break;
@@ -135,6 +135,7 @@ static inline hg_return_t hg_proc_raft_configuration(hg_proc_t proc, struct raft
         for(unsigned i=0; i < conf->n; i++) {
             MRAFT_CHECK(hg_proc_raft_server(proc, conf->servers + i));
         }
+        break;
     case HG_FREE:
         raft_configuration_close(conf);
         break;

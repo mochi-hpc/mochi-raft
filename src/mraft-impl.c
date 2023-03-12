@@ -58,14 +58,14 @@ int mraft_impl_init(struct raft_io *io, raft_id id, const char *address)
     (void)address;
     struct mraft_impl* impl = (struct mraft_impl*)io->impl;
 
-    margo_trace(impl->mid, "[raft] Initializing mraft instance with id %lu", id);
+    margo_trace(impl->mid, "[mraft] Initializing mraft instance with id %lu", id);
 
     hg_bool_t flag;
     hg_id_t rpc_id;
     margo_provider_registered_name(impl->mid, "mraft_send", impl->provider_id, &rpc_id, &flag);
     if(flag == HG_TRUE) {
         margo_error(impl->mid,
-            "[raft] An instance of mraft is already registered with provider id %u",
+            "[mraft] An instance of mraft is already registered with provider id %u",
             impl->provider_id);
         return MRAFT_ERR_ID_USED;
     }
@@ -87,7 +87,7 @@ void mraft_impl_close(struct raft_io *io, raft_io_close_cb cb)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->impl;
 
-    margo_trace(impl->mid, "[raft] Closing mraft instance");
+    margo_trace(impl->mid, "[mraft] Closing mraft instance");
 
     impl->recv_cb = NULL;
     impl->tick_cb = NULL;
@@ -123,9 +123,9 @@ int mraft_impl_load(struct raft_io *io,
                     size_t *n_entries)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->impl;
-    margo_trace(impl->mid, "[raft] Loading state from storage");
+    margo_trace(impl->mid, "[mraft] Loading state from storage");
     if(!impl->log->load) {
-        margo_error(impl->mid, "[raft] load function in mraft_log structure not implemented");
+        margo_error(impl->mid, "[mraft] load function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
     }
     return (impl->log->load)(impl->log, term, voted_for, snapshot, start_index, entries, n_entries);
@@ -135,7 +135,7 @@ static void ticker_ult(void* args)
 {
     struct raft_io* io = (struct raft_io*)args;
     struct mraft_impl* impl = (struct mraft_impl*)io->impl;
-    margo_trace(impl->mid, "[raft] Starting ticker ULT");
+    margo_trace(impl->mid, "[mraft] Starting ticker ULT");
     raft_io_tick_cb tick = impl->tick_cb;
     while(tick) {
         tick(io);
@@ -156,7 +156,7 @@ int mraft_impl_start(struct raft_io *io,
                      raft_io_recv_cb recv)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->impl;
-    margo_trace(impl->mid, "[raft] Starting raft");
+    margo_trace(impl->mid, "[mraft] Starting raft");
     impl->recv_cb           = recv;
     impl->tick_cb           = tick;
     impl->tick_msec         = msecs;
@@ -176,15 +176,15 @@ int mraft_impl_start(struct raft_io *io,
 int mraft_impl_bootstrap(struct raft_io *io, const struct raft_configuration *conf)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->impl;
-    margo_trace(impl->mid, "[raft] Boostrapping raft cluster");
+    margo_trace(impl->mid, "[mraft] Boostrapping raft cluster");
     if(!impl->log->bootstrap) {
-        margo_error(impl->mid, "[raft] bootstrap function in mraft_log structure not implemented");
+        margo_error(impl->mid, "[mraft] bootstrap function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
     }
     if(impl->servers.count != 0) return RAFT_CANTBOOTSTRAP;
     int ret = populate_server_list(io, conf);
     if(ret != 0) {
-        margo_error(impl->mid, "[raft] Could not populate server list from configuration");
+        margo_error(impl->mid, "[mraft] Could not populate server list from configuration");
         return ret;
     }
     return (impl->log->bootstrap)(impl->log, conf);
@@ -194,15 +194,15 @@ int mraft_impl_bootstrap(struct raft_io *io, const struct raft_configuration *co
 int mraft_impl_recover(struct raft_io *io, const struct raft_configuration *conf)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->impl;
-    margo_trace(impl->mid, "[raft] Recovering raft cluster");
+    margo_trace(impl->mid, "[mraft] Recovering raft cluster");
     if(!impl->log->recover) {
-        margo_error(impl->mid, "[raft] recover function in mraft_log structure not implemented");
+        margo_error(impl->mid, "[mraft] recover function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
     }
     free_server_list(io);
     int ret = populate_server_list(io, conf);
     if(ret != 0) {
-        margo_error(impl->mid, "[raft] Could not populate server list from configuration");
+        margo_error(impl->mid, "[mraft] Could not populate server list from configuration");
         return ret;
     }
     return (impl->log->recover)(impl->log, conf);
@@ -216,9 +216,9 @@ int mraft_impl_recover(struct raft_io *io, const struct raft_configuration *conf
 int mraft_impl_set_term(struct raft_io *io, raft_term term)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->impl;
-    margo_trace(impl->mid, "[raft] Setting term to %lu", term);
+    margo_trace(impl->mid, "[mraft] Setting term to %lu", term);
     if(!impl->log->set_term) {
-        margo_error(impl->mid, "[raft] set_term function in mraft_log structure not implemented");
+        margo_error(impl->mid, "[mraft] set_term function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
     }
     return (impl->log->set_term)(impl->log, term);
@@ -231,9 +231,9 @@ int mraft_impl_set_term(struct raft_io *io, raft_term term)
 int mraft_impl_set_vote(struct raft_io *io, raft_id server_id)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->impl;
-    margo_trace(impl->mid, "[raft] Setting vote to %lu", server_id);
+    margo_trace(impl->mid, "[mraft] Setting vote to %lu", server_id);
     if(!impl->log->set_vote) {
-        margo_error(impl->mid, "[raft] set_vote function in mraft_log structure not implemented");
+        margo_error(impl->mid, "[mraft] set_vote function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
     }
     return (impl->log->set_vote)(impl->log, server_id);
@@ -255,7 +255,7 @@ int mraft_impl_send(struct raft_io *io,
     hg_addr_t       addr = HG_ADDR_NULL;
 
     margo_trace(impl->mid,
-        "[raft] Sending message of type %d to server id %lu (%s)",
+        "[mraft] Sending message of type %d to server id %lu (%s)",
         message->type, message->server_id, message->server_address);
 
     req->cb = cb;
@@ -321,7 +321,7 @@ int mraft_impl_append(struct raft_io *io,
                       raft_io_append_cb cb)
 {
     struct mraft_impl* impl  = (struct mraft_impl*)io->impl;
-    margo_trace(impl->mid, "[raft] Appending %u entries to the log", n);
+    margo_trace(impl->mid, "[mraft] Appending %u entries to the log", n);
     struct append_args* args = (struct append_args*)calloc(1, sizeof(*args));
     args->io                 = io;
     args->req                = req;
@@ -349,7 +349,7 @@ static void truncate_ult(void* x)
 int mraft_impl_truncate(struct raft_io *io, raft_index index)
 {
     struct mraft_impl* impl    = (struct mraft_impl*)io->impl;
-    margo_trace(impl->mid, "[raft] Truncating the log at index %lu", index);
+    margo_trace(impl->mid, "[mraft] Truncating the log at index %lu", index);
     struct truncate_args* args = (struct truncate_args*)calloc(1, sizeof(*args));
     args->io                   = io;
     args->index                = index;
@@ -389,7 +389,7 @@ int mraft_impl_snapshot_put(struct raft_io *io,
                             raft_io_snapshot_put_cb cb)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->impl;
-    margo_trace(impl->mid, "[raft] Creating a snapshot");
+    margo_trace(impl->mid, "[mraft] Creating a snapshot");
     req->cb = cb;
     struct snapshot_put_args* args = (struct snapshot_put_args*)calloc(1, sizeof(*args));
     args->io       = io;
@@ -419,7 +419,7 @@ int mraft_impl_snapshot_get(struct raft_io *io,
                             raft_io_snapshot_get_cb cb)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->impl;
-    margo_trace(impl->mid, "[raft] Retrieving a snapshot");
+    margo_trace(impl->mid, "[mraft] Retrieving a snapshot");
     req->cb = cb;
     struct snapshot_get_args* args = (struct snapshot_get_args*)calloc(1, sizeof(*args));
     args->io  = io;
@@ -430,14 +430,17 @@ int mraft_impl_snapshot_get(struct raft_io *io,
 /* Return the current time, expressed in milliseconds. */
 raft_time mraft_impl_time(struct raft_io *io)
 {
-    return 1000*ABT_get_wtime();
+    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    raft_time t = 1000*ABT_get_wtime();
+    return t;
 }
 
 /* Generate a random integer between min and max. */
 int mraft_impl_random(struct raft_io *io, int min, int max)
 {
     struct mraft_impl* impl = (struct mraft_impl*)io->impl;
-    return min + pcg32_boundedrand_r(&impl->rng_state, max-min);
+    int r = min + pcg32_boundedrand_r(&impl->rng_state, max-min);
+    return r;
 }
 
 static void async_work_ult(void* args)
@@ -487,12 +490,37 @@ static void mraft_rpc_ult(hg_handle_t h)
         goto finish;
     }
 
-    margo_trace(mid, "[raft] Received message of type %d from server id %lu (%s)",
+    margo_trace(mid, "[mraft] Received message of type %d from server id %lu (%s)",
                 msg.type, msg.server_id, msg.server_address);
     raft_io_recv_cb recv_cb = impl->recv_cb;
-    if(recv_cb) recv_cb(io, &msg);
+    if(recv_cb) {
+        recv_cb(io, &msg);
+        // this change in the message is necessary because the callback
+        // has already freed some fields but did not reset them
+        switch(msg.type) {
+        case RAFT_IO_APPEND_ENTRIES:
+            msg.append_entries.entries = NULL;
+            msg.append_entries.n_entries = 0;
+            break;
+        case RAFT_IO_APPEND_ENTRIES_RESULT:
+            break;
+        case RAFT_IO_REQUEST_VOTE:
+            break;
+        case RAFT_IO_REQUEST_VOTE_RESULT:
+            break;
+        case RAFT_IO_INSTALL_SNAPSHOT:
+            msg.install_snapshot.conf.n = 0;
+            msg.install_snapshot.conf.servers = NULL;
+            msg.install_snapshot.data.base = NULL;
+            msg.install_snapshot.data.len = 0;
+            break;
+        case RAFT_IO_TIMEOUT_NOW:
+            break;
+      }
+    }
 
 finish:
     margo_free_input(h, &msg);
     margo_destroy(h);
 }
+
