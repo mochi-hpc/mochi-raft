@@ -30,7 +30,7 @@ static int memory_log_load(
 {
     struct memory_log* mlog = (struct memory_log*)log->data;
     *term        = mlog->term;
-    *start_index = 1;
+    *start_index = 0;
     *voted_for   = mlog->voted_for;
     *n_entries   = mlog->entries.count;
     *entries     = raft_malloc((*n_entries)*sizeof(**entries));
@@ -140,7 +140,7 @@ static int memory_log_append(
         mlog->entries.capacity = capacity;
     }
     for(unsigned i = 0; i < n; i++, mlog->entries.count++) {
-        struct raft_entry* last = &mlog->entries.array[mlog->entries.count];
+        struct raft_entry* last = &mlog->entries.array[mlog->entries.count-1];
         last->term     = entries[i].term;
         last->type     = entries[i].type;
         last->buf.len  = entries[i].buf.len;
