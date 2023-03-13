@@ -184,7 +184,7 @@ int main(int argc, char** argv)
     /* Start sending to the state machine */
     srand(rank+1);
     if(raft_state(&raft) == RAFT_LEADER) {
-    for(unsigned i=0; i < 1; i++) {
+    for(unsigned i=0; i < 32; i++) {
         char c = 'A' + rank;
         char* msg = raft_calloc(5, 1);
         sprintf(msg, "%c%03d", 'A'+rank, i);
