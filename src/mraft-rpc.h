@@ -220,4 +220,33 @@ static inline hg_return_t hg_proc_mraft_apply_in_t(hg_proc_t proc, void* arg)
 MERCURY_GEN_PROC(mraft_apply_out_t,
     ((uint32_t)(ret)))
 
+MERCURY_GEN_PROC(mraft_barrier_out_t,
+    ((uint32_t)(ret)))
+
+MERCURY_GEN_PROC(mraft_add_in_t,
+    ((raft_id)(id))
+    ((hg_const_string_t)(address)))
+
+MERCURY_GEN_PROC(mraft_add_out_t,
+    ((uint32_t)(ret)))
+
+MERCURY_GEN_PROC(mraft_assign_in_t,
+    ((raft_id)(id))
+    ((uint32_t)(role)))
+
+MERCURY_GEN_PROC(mraft_assign_out_t,
+    ((uint32_t)(ret)))
+
+MERCURY_GEN_PROC(mraft_remove_in_t,
+    ((raft_id)(id)))
+
+MERCURY_GEN_PROC(mraft_remove_out_t,
+    ((uint32_t)(ret)))
+
+MERCURY_GEN_PROC(mraft_transfer_in_t,
+    ((raft_id)(id)))
+
+MERCURY_GEN_PROC(mraft_transfer_out_t,
+    ((uint32_t)(ret)))
+
 #endif

@@ -171,7 +171,7 @@ int mraft_apply(struct raft *r,
 
     struct mraft_io_impl* impl = (struct mraft_io_impl*)r->io->impl;
 
-    hg_handle_t     h;
+    hg_handle_t     h = HG_HANDLE_NULL;
     hg_return_t     hret;
     hg_addr_t       addr = HG_ADDR_NULL;
 
@@ -180,14 +180,16 @@ int mraft_apply(struct raft *r,
         margo_error(impl->mid,
             "[mraft] Could not resolve address %s: margo_addr_lookup returned %d",
             leader_address, hret);
-        return MRAFT_ERR_FROM_MERCURY;
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
     }
 
     hret = margo_create(impl->mid, addr, impl->forward.apply_rpc_id, &h);
     if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could not create handle: margo_create returned %d", hret);
-        return MRAFT_ERR_FROM_MERCURY;
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
     }
 
     struct apply_in in = {
@@ -199,7 +201,8 @@ int mraft_apply(struct raft *r,
     if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
-        return MRAFT_ERR_FROM_MERCURY;
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
     }
 
     mraft_apply_out_t out = {0};
@@ -212,12 +215,11 @@ int mraft_apply(struct raft *r,
         goto finish;
     }
 
-    margo_free_output(h, &out);
-    margo_destroy(h);
-
     ret = out.ret;
 
 finish:
+    margo_free_output(h, &out);
+    margo_destroy(h);
     return ret;
 }
 
@@ -247,12 +249,59 @@ int mraft_barrier(struct raft *r)
         return 0;
     }
 
-    // TODO handle forwarding to leader
     raft_id     leader_id = 0;
     const char* leader_address = NULL;
     raft_leader(r, &leader_id, &leader_address);
 
-    return 0;
+    if(leader_id == 0) return RAFT_LEADERSHIPLOST;
+
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)r->io->impl;
+
+    hg_handle_t     h = HG_HANDLE_NULL;
+    hg_return_t     hret;
+    hg_addr_t       addr = HG_ADDR_NULL;
+
+    hret = margo_addr_lookup(impl->mid, leader_address, &addr);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not resolve address %s: margo_addr_lookup returned %d",
+            leader_address, hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    hret = margo_create(impl->mid, addr, impl->forward.barrier_rpc_id, &h);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not create handle: margo_create returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    hret = margo_provider_forward(impl->provider_id, h, NULL);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    mraft_barrier_out_t out = {0};
+
+    hret = margo_get_output(h, &out);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could get output: margo_get_output returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    ret = out.ret;
+
+finish:
+    margo_free_output(h, &out);
+    margo_destroy(h);
+    return ret;
 }
 
 static void mraft_change_cb(struct raft_change *req, int status)
@@ -283,12 +332,64 @@ int mraft_add(struct raft *r,
         return 0;
     }
 
-    // TODO handle forwarding to leader
     raft_id     leader_id = 0;
     const char* leader_address = NULL;
     raft_leader(r, &leader_id, &leader_address);
 
-    return 0;
+    if(leader_id == 0) return RAFT_LEADERSHIPLOST;
+
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)r->io->impl;
+
+    hg_handle_t     h = HG_HANDLE_NULL;
+    hg_return_t     hret;
+    hg_addr_t       addr = HG_ADDR_NULL;
+
+    hret = margo_addr_lookup(impl->mid, leader_address, &addr);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not resolve address %s: margo_addr_lookup returned %d",
+            leader_address, hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    hret = margo_create(impl->mid, addr, impl->forward.add_rpc_id, &h);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not create handle: margo_create returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    mraft_add_in_t in = {
+        .id = id,
+        .address = address
+    };
+
+    hret = margo_provider_forward(impl->provider_id, h, NULL);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    mraft_add_out_t out = {0};
+
+    hret = margo_get_output(h, &out);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could get output: margo_get_output returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    ret = out.ret;
+
+finish:
+    margo_free_output(h, &out);
+    margo_destroy(h);
+    return ret;
 }
 
 int mraft_assign(struct raft *r,
@@ -313,12 +414,64 @@ int mraft_assign(struct raft *r,
         return 0;
     }
 
-    // TODO handle forwarding to leader
     raft_id     leader_id = 0;
     const char* leader_address = NULL;
     raft_leader(r, &leader_id, &leader_address);
 
-    return 0;
+    if(leader_id == 0) return RAFT_LEADERSHIPLOST;
+
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)r->io->impl;
+
+    hg_handle_t     h = HG_HANDLE_NULL;
+    hg_return_t     hret;
+    hg_addr_t       addr = HG_ADDR_NULL;
+
+    hret = margo_addr_lookup(impl->mid, leader_address, &addr);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not resolve address %s: margo_addr_lookup returned %d",
+            leader_address, hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    hret = margo_create(impl->mid, addr, impl->forward.assign_rpc_id, &h);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not create handle: margo_create returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    mraft_assign_in_t in = {
+        .id = id,
+        .role = role
+    };
+
+    hret = margo_provider_forward(impl->provider_id, h, NULL);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    mraft_assign_out_t out = {0};
+
+    hret = margo_get_output(h, &out);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could get output: margo_get_output returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    ret = out.ret;
+
+finish:
+    margo_free_output(h, &out);
+    margo_destroy(h);
+    return ret;
 }
 
 int mraft_remove(struct raft *r,
@@ -342,12 +495,63 @@ int mraft_remove(struct raft *r,
         return 0;
     }
 
-    // TODO handle forwarding to leader
     raft_id     leader_id = 0;
     const char* leader_address = NULL;
     raft_leader(r, &leader_id, &leader_address);
 
-    return 0;
+    if(leader_id == 0) return RAFT_LEADERSHIPLOST;
+
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)r->io->impl;
+
+    hg_handle_t     h = HG_HANDLE_NULL;
+    hg_return_t     hret;
+    hg_addr_t       addr = HG_ADDR_NULL;
+
+    hret = margo_addr_lookup(impl->mid, leader_address, &addr);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not resolve address %s: margo_addr_lookup returned %d",
+            leader_address, hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    hret = margo_create(impl->mid, addr, impl->forward.remove_rpc_id, &h);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not create handle: margo_create returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    mraft_remove_in_t in = {
+        .id = id,
+    };
+
+    hret = margo_provider_forward(impl->provider_id, h, NULL);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    mraft_remove_out_t out = {0};
+
+    hret = margo_get_output(h, &out);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could get output: margo_get_output returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    ret = out.ret;
+
+finish:
+    margo_free_output(h, &out);
+    margo_destroy(h);
+    return ret;
 }
 
 static void mraft_transfer_cb(struct raft_transfer *req)
@@ -375,10 +579,61 @@ int mraft_transfer(struct raft *r,
         return 0;
     }
 
-    // TODO handle forwarding to leader
     raft_id     leader_id = 0;
     const char* leader_address = NULL;
     raft_leader(r, &leader_id, &leader_address);
 
-    return 0;
+    if(leader_id == 0) return RAFT_LEADERSHIPLOST;
+
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)r->io->impl;
+
+    hg_handle_t     h = HG_HANDLE_NULL;
+    hg_return_t     hret;
+    hg_addr_t       addr = HG_ADDR_NULL;
+
+    hret = margo_addr_lookup(impl->mid, leader_address, &addr);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not resolve address %s: margo_addr_lookup returned %d",
+            leader_address, hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    hret = margo_create(impl->mid, addr, impl->forward.transfer_rpc_id, &h);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not create handle: margo_create returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    mraft_transfer_in_t in = {
+        .id = id,
+    };
+
+    hret = margo_provider_forward(impl->provider_id, h, NULL);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    mraft_transfer_out_t out = {0};
+
+    hret = margo_get_output(h, &out);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could get output: margo_get_output returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    ret = out.ret;
+
+finish:
+    margo_free_output(h, &out);
+    margo_destroy(h);
+    return ret;
 }

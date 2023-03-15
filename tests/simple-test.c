@@ -135,7 +135,7 @@ int main(int argc, char** argv)
 
     /* Initialize RAFT */
     struct raft raft;
-    ret = raft_init(&raft, &raft_io, &raft_fsm, self_id, self_addr);
+    ret = mraft_init(&raft, &raft_io, &raft_fsm, self_id, self_addr);
     margo_assert(mid, ret == 0);
 
     /* Initialize RAFT tracer */
@@ -151,7 +151,7 @@ int main(int argc, char** argv)
     margo_assert(mid, ret == 0);
     fprintf(stderr, "============= Bootstrap done ============\n");
     /* Start RAFT */
-    ret = raft_start(&raft);
+    ret = mraft_start(&raft);
     margo_assert(mid, ret == 0);
     fprintf(stderr, "============= Start done ============\n");
 
@@ -180,7 +180,7 @@ int main(int argc, char** argv)
     MPI_Barrier(MPI_COMM_WORLD);
 
     /* Finalize RAFT */
-    raft_close(&raft, NULL);
+    mraft_close(&raft);
 
     /* Finalize raft_io backend */
     ret = mraft_io_finalize(&raft_io);

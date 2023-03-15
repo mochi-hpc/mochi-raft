@@ -15,6 +15,21 @@ static void mraft_craft_rpc_ult(hg_handle_t h);
 static DECLARE_MARGO_RPC_HANDLER(mraft_apply_rpc_ult)
 static void mraft_apply_rpc_ult(hg_handle_t h);
 
+static DECLARE_MARGO_RPC_HANDLER(mraft_barrier_rpc_ult)
+static void mraft_barrier_rpc_ult(hg_handle_t h);
+
+static DECLARE_MARGO_RPC_HANDLER(mraft_add_rpc_ult)
+static void mraft_add_rpc_ult(hg_handle_t h);
+
+static DECLARE_MARGO_RPC_HANDLER(mraft_assign_rpc_ult)
+static void mraft_assign_rpc_ult(hg_handle_t h);
+
+static DECLARE_MARGO_RPC_HANDLER(mraft_remove_rpc_ult)
+static void mraft_remove_rpc_ult(hg_handle_t h);
+
+static DECLARE_MARGO_RPC_HANDLER(mraft_transfer_rpc_ult)
+static void mraft_transfer_rpc_ult(hg_handle_t h);
+
 static inline void free_server_list(struct raft_io *io)
 {
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
@@ -82,6 +97,31 @@ int mraft_io_impl_init(struct raft_io *io, raft_id id, const char *address)
             mraft_apply_in_t, mraft_apply_out_t, mraft_apply_rpc_ult, impl->provider_id, impl->pool);
     margo_register_data(impl->mid, id, (void*)io, NULL);
     impl->forward.apply_rpc_id = id;
+
+    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_barrier",
+            void, mraft_barrier_out_t, mraft_barrier_rpc_ult, impl->provider_id, impl->pool);
+    margo_register_data(impl->mid, id, (void*)io, NULL);
+    impl->forward.barrier_rpc_id = id;
+
+    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_add",
+            mraft_add_in_t, mraft_add_out_t, mraft_add_rpc_ult, impl->provider_id, impl->pool);
+    margo_register_data(impl->mid, id, (void*)io, NULL);
+    impl->forward.add_rpc_id = id;
+
+    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_assign",
+            mraft_assign_in_t, mraft_assign_out_t, mraft_assign_rpc_ult, impl->provider_id, impl->pool);
+    margo_register_data(impl->mid, id, (void*)io, NULL);
+    impl->forward.assign_rpc_id = id;
+
+    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_remove",
+            mraft_remove_in_t, mraft_remove_out_t, mraft_remove_rpc_ult, impl->provider_id, impl->pool);
+    margo_register_data(impl->mid, id, (void*)io, NULL);
+    impl->forward.remove_rpc_id = id;
+
+    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_transfer",
+            mraft_transfer_in_t, mraft_transfer_out_t, mraft_transfer_rpc_ult, impl->provider_id, impl->pool);
+    margo_register_data(impl->mid, id, (void*)io, NULL);
+    impl->forward.transfer_rpc_id = id;
 
     return MRAFT_SUCCESS;
 }
@@ -493,6 +533,157 @@ static void mraft_apply_rpc_ult(hg_handle_t h)
     margo_trace(impl->mid, "[mraft] Received forwarded apply request");
 
     out.ret = mraft_apply(raft, in.bufs, in.n_bufs);
+
+finish:
+    margo_respond(h, &out);
+    margo_free_input(h, &in);
+    margo_destroy(h);
+}
+
+static DEFINE_MARGO_RPC_HANDLER(mraft_barrier_rpc_ult)
+static void mraft_barrier_rpc_ult(hg_handle_t h)
+{
+    hg_return_t hret;
+
+    margo_instance_id mid = margo_hg_handle_get_instance(h);
+    const struct hg_info* info = margo_get_info(h);
+    struct raft_io* io = (struct raft_io*)margo_registered_data(mid, info->id);
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
+
+    mraft_barrier_out_t out = {0};
+
+    struct raft* raft = (struct raft*)io->data;
+
+    margo_trace(impl->mid, "[mraft] Received forwarded barrier request");
+
+    out.ret = mraft_barrier(raft);
+
+finish:
+    margo_respond(h, &out);
+    margo_destroy(h);
+}
+
+static DEFINE_MARGO_RPC_HANDLER(mraft_add_rpc_ult)
+static void mraft_add_rpc_ult(hg_handle_t h)
+{
+    hg_return_t hret;
+
+    margo_instance_id mid = margo_hg_handle_get_instance(h);
+    const struct hg_info* info = margo_get_info(h);
+    struct raft_io* io = (struct raft_io*)margo_registered_data(mid, info->id);
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
+
+    mraft_add_in_t in = {0};
+    mraft_add_out_t out = {0};
+
+    hret = margo_get_input(h, &in);
+    if(hret != HG_SUCCESS) {
+        margo_error(mid, "[mraft] Could not deserialize output (mercury error %d)", hret);
+        out.ret = RAFT_INVALID;
+        goto finish;
+    }
+
+    struct raft* raft = (struct raft*)io->data;
+
+    margo_trace(impl->mid, "[mraft] Received forwarded add request");
+
+    out.ret = mraft_add(raft, in.id, in.address);
+
+finish:
+    margo_respond(h, &out);
+    margo_free_input(h, &in);
+    margo_destroy(h);
+}
+
+static DEFINE_MARGO_RPC_HANDLER(mraft_assign_rpc_ult)
+static void mraft_assign_rpc_ult(hg_handle_t h)
+{
+    hg_return_t hret;
+
+    margo_instance_id mid = margo_hg_handle_get_instance(h);
+    const struct hg_info* info = margo_get_info(h);
+    struct raft_io* io = (struct raft_io*)margo_registered_data(mid, info->id);
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
+
+    mraft_assign_in_t in = {0};
+    mraft_assign_out_t out = {0};
+
+    hret = margo_get_input(h, &in);
+    if(hret != HG_SUCCESS) {
+        margo_error(mid, "[mraft] Could not deserialize output (mercury error %d)", hret);
+        out.ret = RAFT_INVALID;
+        goto finish;
+    }
+
+    struct raft* raft = (struct raft*)io->data;
+
+    margo_trace(impl->mid, "[mraft] Received forwarded assign request");
+
+    out.ret = mraft_assign(raft, in.id, in.role);
+
+finish:
+    margo_respond(h, &out);
+    margo_free_input(h, &in);
+    margo_destroy(h);
+}
+
+static DEFINE_MARGO_RPC_HANDLER(mraft_remove_rpc_ult)
+static void mraft_remove_rpc_ult(hg_handle_t h)
+{
+    hg_return_t hret;
+
+    margo_instance_id mid = margo_hg_handle_get_instance(h);
+    const struct hg_info* info = margo_get_info(h);
+    struct raft_io* io = (struct raft_io*)margo_registered_data(mid, info->id);
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
+
+    mraft_remove_in_t in = {0};
+    mraft_remove_out_t out = {0};
+
+    hret = margo_get_input(h, &in);
+    if(hret != HG_SUCCESS) {
+        margo_error(mid, "[mraft] Could not deserialize output (mercury error %d)", hret);
+        out.ret = RAFT_INVALID;
+        goto finish;
+    }
+
+    struct raft* raft = (struct raft*)io->data;
+
+    margo_trace(impl->mid, "[mraft] Received forwarded remove request");
+
+    out.ret = mraft_remove(raft, in.id);
+
+finish:
+    margo_respond(h, &out);
+    margo_free_input(h, &in);
+    margo_destroy(h);
+}
+
+static DEFINE_MARGO_RPC_HANDLER(mraft_transfer_rpc_ult)
+static void mraft_transfer_rpc_ult(hg_handle_t h)
+{
+    hg_return_t hret;
+
+    margo_instance_id mid = margo_hg_handle_get_instance(h);
+    const struct hg_info* info = margo_get_info(h);
+    struct raft_io* io = (struct raft_io*)margo_registered_data(mid, info->id);
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
+
+    mraft_transfer_in_t in = {0};
+    mraft_transfer_out_t out = {0};
+
+    hret = margo_get_input(h, &in);
+    if(hret != HG_SUCCESS) {
+        margo_error(mid, "[mraft] Could not deserialize output (mercury error %d)", hret);
+        out.ret = RAFT_INVALID;
+        goto finish;
+    }
+
+    struct raft* raft = (struct raft*)io->data;
+
+    margo_trace(impl->mid, "[mraft] Received forwarded remove request");
+
+    out.ret = mraft_transfer(raft, in.id);
 
 finish:
     margo_respond(h, &out);
