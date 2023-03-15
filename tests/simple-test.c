@@ -123,14 +123,14 @@ int main(int argc, char** argv)
     struct mraft_log* log = memory_log_create();
 
     /* Initialize raft_io backend */
-    struct mraft_init_args mraft_init_args = {
+    struct mraft_io_init_args mraft_io_init_args = {
         .mid  = mid,
         .pool = ABT_POOL_NULL,
         .id   = 42,
         .log  = log
     };
     struct raft_io raft_io;
-    ret = mraft_init(&mraft_init_args, &raft_io);
+    ret = mraft_io_init(&mraft_io_init_args, &raft_io);
     margo_assert(mid, ret == 0);
 
     /* Initialize RAFT */
@@ -184,7 +184,7 @@ int main(int argc, char** argv)
     /* Start sending to the state machine */
     srand(rank+1);
     if(raft_state(&raft) == RAFT_LEADER) {
-    for(unsigned i=0; i < 32; i++) {
+    for(unsigned i=0; i < 256; i++) {
         char c = 'A' + rank;
         char* msg = raft_calloc(5, 1);
         sprintf(msg, "%c%03d", 'A'+rank, i);
@@ -204,7 +204,7 @@ int main(int argc, char** argv)
     raft_close(&raft, NULL);
 
     /* Finalize raft_io backend */
-    ret = mraft_finalize(&raft_io);
+    ret = mraft_io_finalize(&raft_io);
     margo_assert(mid, ret == 0);
 
     /* Finalize the log */
