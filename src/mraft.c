@@ -7,6 +7,10 @@
 #include "mraft-impl.h"
 #include <margo.h>
 #include <stdlib.h>
+#include "config.h"
+#ifdef ENABLE_SSG
+#include <ssg.h>
+#endif
 
 int mraft_io_init(const struct mraft_io_init_args* args, struct raft_io* raft_io)
 {

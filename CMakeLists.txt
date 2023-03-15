@@ -6,6 +6,7 @@ enable_testing ()
 
 option (ENABLE_TESTS    "Build tests" OFF)
 option (ENABLE_EXAMPLES "Build examples" OFF)
+option (ENABLE_SSG      "Build SSG support" OFF)
 option (ENABLE_BEDROCK  "Build bedrock module" OFF)
 
 # add our cmake module directory to the path
@@ -40,10 +41,14 @@ pkg_check_modules (RAFT REQUIRED IMPORTED_TARGET raft)
 pkg_check_modules (UUID REQUIRED IMPORTED_TARGET uuid)
 # search for abt-io
 pkg_check_modules (ABTIO REQUIRED IMPORTED_TARGET abt-io)
-# search for ssg
-pkg_check_modules (SSG REQUIRED IMPORTED_TARGET ssg)
 # search for json-c
 pkg_check_modules (JSONC REQUIRED IMPORTED_TARGET json-c)
+
+if (ENABLE_SSG)
+    # search for ssg
+    pkg_check_modules (SSG REQUIRED IMPORTED_TARGET ssg)
+    set (PC_REQUIRES ssg)
+endif ()
 
 # library version set here (e.g. for shared libs).
 set (MRAFT_VERSION_MAJOR 0)

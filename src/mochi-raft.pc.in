@@ -7,6 +7,6 @@ Name: mochi-raft
 Description: Implementation of the RAFT protocol using Mochi and C-Raft
 Version: @MRAFT_VERSION@
 
-Requires: margo abt-io ssg raft
+Requires: margo raft @PC_REQUIRES@
 Libs: -L${libdir} @PRIVATE_LIBS@
 Cflags: -I${includedir}
