@@ -77,9 +77,10 @@ void mraft_close(struct raft* r)
 
 #ifdef ENABLE_SSG
 int mraft_bootstrap_from_ssg(struct raft* r,
-                            ssg_group_id_t gid)
+                             ssg_group_id_t gid)
 {
     int ret;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)r->io->impl;
     struct raft_configuration conf = {0};
     raft_configuration_init(&conf);
     int group_size;
@@ -88,9 +89,17 @@ int mraft_bootstrap_from_ssg(struct raft* r,
         ssg_member_id_t member_id = 0;
         char* address = NULL;
         ret = ssg_get_group_member_id_from_rank(gid, i, &member_id);
-        if(ret != SSG_SUCCESS) goto error;
+        if(ret != SSG_SUCCESS) {
+            margo_error(impl->mid, "[mraft] In mraft_bootstrap_from_ssg:"
+                " ssg_get_group_member_id_from_rank returned %d", ret);
+            goto error;
+        }
         ret = ssg_get_group_member_addr_str(gid, member_id, &address);
-        if(ret != SSG_SUCCESS) goto error;
+        if(ret != SSG_SUCCESS) {
+            margo_error(impl->mid, "[mraft] In mraft_bootstrap_from_ssg:"
+                " ssg_get_group_member_add_str returned %d", ret);
+            goto error;
+        }
         raft_configuration_add(&conf, member_id, address, RAFT_VOTER);
     }
     ret = raft_bootstrap(r, &conf);
@@ -99,6 +108,15 @@ int mraft_bootstrap_from_ssg(struct raft* r,
 error:
     raft_configuration_close(&conf);
     return RAFT_INVALID;
+}
+#else
+int mraft_bootstrap_from_ssg(struct raft* r,
+                             ssg_group_id_t gid)
+{
+    (void)gid;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)r->io->impl;
+    margo_error(impl->mid, "[mraft] Mraft was not compiled with SSG support");
+    return RAFT_UNAUTHORIZED;
 }
 #endif
 
