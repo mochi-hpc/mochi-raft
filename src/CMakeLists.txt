@@ -1,7 +1,7 @@
 # set source files
 set (src-files
      mraft.c
-     mraft-impl.c
+     mraft-io.c
      pcg_basic.c)
 
 set (bedrock-module-src-files

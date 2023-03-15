@@ -4,7 +4,7 @@
  * See COPYRIGHT in top-level directory.
  */
 #include "mochi-raft.h"
-#include "mraft-impl.h"
+#include "mraft-io.h"
 #include "mraft-rpc.h"
 #include <stdlib.h>
 #include <margo.h>
@@ -14,7 +14,7 @@ static void mraft_rpc_ult(hg_handle_t h);
 
 static inline void free_server_list(struct raft_io *io)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     for(unsigned i=0; i < impl->servers.count; i++) {
         free(impl->servers.str_addr[i]);
         margo_addr_free(impl->mid, impl->servers.hg_addr[i]);
@@ -30,7 +30,7 @@ static inline void free_server_list(struct raft_io *io)
 
 static inline int populate_server_list(struct raft_io *io, const struct raft_configuration *conf)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
 
     impl->servers.count    = conf->n;
     impl->servers.ids      = calloc(conf->n, sizeof(*impl->servers.ids));
@@ -52,11 +52,11 @@ error:
 }
 
 /* Initialize the backend with operational parameters such as server ID and address. */
-int mraft_impl_init(struct raft_io *io, raft_id id, const char *address)
+int mraft_io_impl_init(struct raft_io *io, raft_id id, const char *address)
 {
     (void)id;
     (void)address;
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
 
     margo_trace(impl->mid, "[mraft] Initializing mraft instance with id %lu", id);
 
@@ -83,9 +83,9 @@ int mraft_impl_init(struct raft_io *io, raft_id id, const char *address)
  * requests be completed or canceled as soon as possible. Invoke the close callback
  * once the raft_io instance can be freed.
  */
-void mraft_impl_close(struct raft_io *io, raft_io_close_cb cb)
+void mraft_io_impl_close(struct raft_io *io, raft_io_close_cb cb)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
 
     margo_trace(impl->mid, "[mraft] Closing mraft instance");
 
@@ -114,7 +114,7 @@ void mraft_impl_close(struct raft_io *io, raft_io_close_cb cb)
  * raft_malloc(). If this function completes successfully, ownership of such memory
  * is transfered to the caller.
  */
-int mraft_impl_load(struct raft_io *io,
+int mraft_io_impl_load(struct raft_io *io,
                     raft_term *term,
                     raft_id *voted_for,
                     struct raft_snapshot **snapshot,
@@ -122,7 +122,7 @@ int mraft_impl_load(struct raft_io *io,
                     struct raft_entry *entries[],
                     size_t *n_entries)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Loading state from storage");
     if(!impl->log->load) {
         margo_error(impl->mid, "[mraft] load function in mraft_log structure not implemented");
@@ -134,7 +134,7 @@ int mraft_impl_load(struct raft_io *io,
 static void ticker_ult(void* args)
 {
     struct raft_io* io = (struct raft_io*)args;
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Starting ticker ULT");
     raft_io_tick_cb tick = impl->tick_cb;
     while(tick) {
@@ -150,12 +150,12 @@ static void ticker_ult(void* args)
  * the tick callback every msecs milliseconds. The recv callback must be invoked
  * when receiving a message.
  */
-int mraft_impl_start(struct raft_io *io,
+int mraft_io_impl_start(struct raft_io *io,
                      unsigned msecs,
                      raft_io_tick_cb tick,
                      raft_io_recv_cb recv)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Starting raft");
     impl->recv_cb           = recv;
     impl->tick_cb           = tick;
@@ -173,9 +173,9 @@ int mraft_impl_start(struct raft_io *io,
  * If an attempt is made to bootstrap a server that has already some state,
  * then RAFT_CANTBOOTSTRAP must be returned.
  */
-int mraft_impl_bootstrap(struct raft_io *io, const struct raft_configuration *conf)
+int mraft_io_impl_bootstrap(struct raft_io *io, const struct raft_configuration *conf)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Boostrapping raft cluster");
     if(!impl->log->bootstrap) {
         margo_error(impl->mid, "[mraft] bootstrap function in mraft_log structure not implemented");
@@ -191,9 +191,9 @@ int mraft_impl_bootstrap(struct raft_io *io, const struct raft_configuration *co
 }
 
 /* Force appending a new configuration as last entry of the log. */
-int mraft_impl_recover(struct raft_io *io, const struct raft_configuration *conf)
+int mraft_io_impl_recover(struct raft_io *io, const struct raft_configuration *conf)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Recovering raft cluster");
     if(!impl->log->recover) {
         margo_error(impl->mid, "[mraft] recover function in mraft_log structure not implemented");
@@ -213,9 +213,9 @@ int mraft_impl_recover(struct raft_io *io, const struct raft_configuration *conf
  * The implementation MUST ensure that the change is durable before returning
  * (e.g. using fdatasync() or O_DSYNC).
  */
-int mraft_impl_set_term(struct raft_io *io, raft_term term)
+int mraft_io_impl_set_term(struct raft_io *io, raft_term term)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Setting term to %lu", term);
     if(!impl->log->set_term) {
         margo_error(impl->mid, "[mraft] set_term function in mraft_log structure not implemented");
@@ -228,9 +228,9 @@ int mraft_impl_set_term(struct raft_io *io, raft_term term)
  * The implementation MUST ensure that the change is durable before returning
  * (e.g. using fdatasync() or O_DSYNC).
  */
-int mraft_impl_set_vote(struct raft_io *io, raft_id server_id)
+int mraft_io_impl_set_vote(struct raft_io *io, raft_id server_id)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Setting vote to %lu", server_id);
     if(!impl->log->set_vote) {
         margo_error(impl->mid, "[mraft] set_vote function in mraft_log structure not implemented");
@@ -244,12 +244,12 @@ int mraft_impl_set_vote(struct raft_io *io, raft_id server_id)
  * The implementation is guaranteed that the memory referenced in the given message
  * will not be released until the cb callback is invoked.
  */
-int mraft_impl_send(struct raft_io *io,
+int mraft_io_impl_send(struct raft_io *io,
                     struct raft_io_send *req,
                     const struct raft_message *message,
                     raft_io_send_cb cb)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     hg_handle_t     h;
     hg_return_t     hret;
     hg_addr_t       addr = HG_ADDR_NULL;
@@ -302,7 +302,7 @@ struct append_args {
 static void append_ult(void* x)
 {
     struct append_args* args = (struct append_args*)x;
-    struct mraft_impl* impl = (struct mraft_impl*)args->io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)args->io->impl;
     int status = impl->log->append ?
         (impl->log->append)(impl->log, args->entries, args->n) : RAFT_IOERR;
     if(args->req->cb) (args->req->cb)(args->req, status);
@@ -314,13 +314,13 @@ static void append_ult(void* x)
  * The implementation is guaranteed that the memory holding the given entries will
  * not be released until the cb callback is invoked.
  */
-int mraft_impl_append(struct raft_io *io,
+int mraft_io_impl_append(struct raft_io *io,
                       struct raft_io_append *req,
                       const struct raft_entry entries[],
                       unsigned n,
                       raft_io_append_cb cb)
 {
-    struct mraft_impl* impl  = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl  = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Appending %u entries to the log", n);
     struct append_args* args = (struct append_args*)calloc(1, sizeof(*args));
     args->io                 = io;
@@ -339,16 +339,16 @@ struct truncate_args {
 static void truncate_ult(void* x)
 {
     struct truncate_args* args = (struct truncate_args*)x;
-    struct mraft_impl* impl = (struct mraft_impl*)args->io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)args->io->impl;
     if(impl->log->truncate)
         (impl->log->truncate)(impl->log, args->index);
     free(args);
 }
 
 /* Asynchronously truncate all log entries from the given index onwards. */
-int mraft_impl_truncate(struct raft_io *io, raft_index index)
+int mraft_io_impl_truncate(struct raft_io *io, raft_index index)
 {
-    struct mraft_impl* impl    = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl    = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Truncating the log at index %lu", index);
     struct truncate_args* args = (struct truncate_args*)calloc(1, sizeof(*args));
     args->io                   = io;
@@ -366,7 +366,7 @@ struct snapshot_put_args {
 static void snapshot_put_ult(void* x)
 {
     struct snapshot_put_args* args = (struct snapshot_put_args*)x;
-    struct mraft_impl* impl = (struct mraft_impl*)args->io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)args->io->impl;
     int status = impl->log->snapshot_put ?
         (impl->log->snapshot_put)(impl->log, args->trailing, args->snapshot) : RAFT_IOERR;
     if(args->req->cb) (args->req->cb)(args->req, status);
@@ -382,13 +382,13 @@ static void snapshot_put_ult(void* x)
  * If a request is submitted, the raft engine won’t submit any other request until
  * the original one has completed.
  */
-int mraft_impl_snapshot_put(struct raft_io *io,
+int mraft_io_impl_snapshot_put(struct raft_io *io,
                             unsigned trailing,
                             struct raft_io_snapshot_put *req,
                             const struct raft_snapshot *snapshot,
                             raft_io_snapshot_put_cb cb)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Creating a snapshot");
     req->cb = cb;
     struct snapshot_put_args* args = (struct snapshot_put_args*)calloc(1, sizeof(*args));
@@ -407,18 +407,18 @@ struct snapshot_get_args {
 static void snapshot_get_ult(void* x)
 {
     struct snapshot_get_args* args = (struct snapshot_get_args*)x;
-    struct mraft_impl* impl = (struct mraft_impl*)args->io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)args->io->impl;
     if(impl->log->snapshot_get)
         (impl->log->snapshot_get)(impl->log, args->req, args->req->cb);
     free(args);
 }
 
 /* Asynchronously load the last snapshot. */
-int mraft_impl_snapshot_get(struct raft_io *io,
+int mraft_io_impl_snapshot_get(struct raft_io *io,
                             struct raft_io_snapshot_get *req,
                             raft_io_snapshot_get_cb cb)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Retrieving a snapshot");
     req->cb = cb;
     struct snapshot_get_args* args = (struct snapshot_get_args*)calloc(1, sizeof(*args));
@@ -428,17 +428,17 @@ int mraft_impl_snapshot_get(struct raft_io *io,
 }
 
 /* Return the current time, expressed in milliseconds. */
-raft_time mraft_impl_time(struct raft_io *io)
+raft_time mraft_io_impl_time(struct raft_io *io)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     raft_time t = 1000*ABT_get_wtime();
     return t;
 }
 
 /* Generate a random integer between min and max. */
-int mraft_impl_random(struct raft_io *io, int min, int max)
+int mraft_io_impl_random(struct raft_io *io, int min, int max)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     int r = min + pcg32_boundedrand_r(&impl->rng_state, max-min);
     return r;
 }
@@ -451,11 +451,11 @@ static void async_work_ult(void* args)
 }
 
 /* Submit work to be completed asynchronously */
-int mraft_impl_async_work(struct raft_io *io,
+int mraft_io_impl_async_work(struct raft_io *io,
                           struct raft_io_async_work *req,
                           raft_io_async_work_cb cb)
 {
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     req->cb = cb;
     return ABT_thread_create(impl->pool, async_work_ult, req, ABT_THREAD_ATTR_NULL, NULL);
 }
@@ -469,7 +469,7 @@ static void mraft_rpc_ult(hg_handle_t h)
     margo_instance_id mid = margo_hg_handle_get_instance(h);
     const struct hg_info* info = margo_get_info(h);
     struct raft_io* io = (struct raft_io*)margo_registered_data(mid, info->id);
-    struct mraft_impl* impl = (struct mraft_impl*)io->impl;
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
 
     hret = margo_get_input(h, &msg);
     if(hret != HG_SUCCESS) {
