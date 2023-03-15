@@ -147,26 +147,8 @@ int main(int argc, char** argv)
     raft.tracer = &tracer;
 
     /* Bootstrap RAFT from SSG members */
-    struct raft_configuration conf = {0};
-    raft_configuration_init(&conf);
-    int group_size;
-    ssg_get_group_size(gid, &group_size);
-    for(unsigned i = 0; i < group_size; i++) {
-        ssg_member_id_t member_id = 0;
-        char* address = NULL;
-        ret = ssg_get_group_member_id_from_rank(gid, i, &member_id);
-        margo_assert(mid, ret == 0);
-        ssg_get_group_member_addr_str(gid, member_id, &address);
-        margo_assert(mid, ret == 0);
-        raft_configuration_add(&conf, member_id, address, RAFT_VOTER);
-        margo_trace(mid, "[test] Added %s with member id %lu to configuration",
-                    address, member_id);
-    }
-    ret = raft_bootstrap(&raft,&conf);
+    ret = mraft_bootstrap_from_ssg(&raft, gid);
     margo_assert(mid, ret == 0);
-    margo_assert(mid, conf.n == group_size);
-    raft_configuration_close(&conf);
-    //raft_set_pre_vote(&raft, true);
     fprintf(stderr, "============= Bootstrap done ============\n");
     /* Start RAFT */
     ret = raft_start(&raft);

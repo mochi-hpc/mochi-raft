@@ -76,10 +76,29 @@ void mraft_close(struct raft* r)
 }
 
 #ifdef ENABLE_SSG
-int mraft_boostrap_from_ssg(struct raft* r,
+int mraft_bootstrap_from_ssg(struct raft* r,
                             ssg_group_id_t gid)
 {
-    // TODO
+    int ret;
+    struct raft_configuration conf = {0};
+    raft_configuration_init(&conf);
+    int group_size;
+    ssg_get_group_size(gid, &group_size);
+    for(unsigned i = 0; i < group_size; i++) {
+        ssg_member_id_t member_id = 0;
+        char* address = NULL;
+        ret = ssg_get_group_member_id_from_rank(gid, i, &member_id);
+        if(ret != SSG_SUCCESS) goto error;
+        ret = ssg_get_group_member_addr_str(gid, member_id, &address);
+        if(ret != SSG_SUCCESS) goto error;
+        raft_configuration_add(&conf, member_id, address, RAFT_VOTER);
+    }
+    ret = raft_bootstrap(r, &conf);
+    raft_configuration_close(&conf);
+    return ret;
+error:
+    raft_configuration_close(&conf);
+    return RAFT_INVALID;
 }
 #endif
 

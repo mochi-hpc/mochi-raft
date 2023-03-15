@@ -140,8 +140,8 @@ typedef uint64_t ssg_group_id_t;
  *
  * @return 0 or other MRAFT error codes.
  */
-int mraft_boostrap_from_ssg(struct raft* r,
-                            ssg_group_id_t gid);
+int mraft_bootstrap_from_ssg(struct raft* r,
+                             ssg_group_id_t gid);
 
 /**
  * @see raft_recover.
