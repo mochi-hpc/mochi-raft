@@ -5,6 +5,7 @@
  */
 #include "mochi-raft.h"
 #include "mraft-io.h"
+#include "mraft-rpc.h"
 #include <margo.h>
 #include <stdlib.h>
 #include "config.h"
@@ -137,9 +138,22 @@ int mraft_apply(struct raft *r,
         ABT_eventual ev = ABT_EVENTUAL_NULL;
         ABT_eventual_create(sizeof(int), &ev);
         req.data = (void*)ev;
-        ret = raft_apply(r, &req, bufs, n, mraft_apply_cb);
+
+        // make copies of the buffers because raft wants to
+        // take responsibility for them.
+        struct raft_buffer* bufs_cpy = alloca(n*sizeof(*bufs_cpy));
+        for(unsigned i = 0; i < n; i++) {
+            bufs_cpy[i].len = bufs[i].len;
+            bufs_cpy[i].base = raft_malloc(bufs_cpy[i].len);
+            memcpy(bufs_cpy[i].base, bufs[i].base, bufs_cpy[i].len);
+        }
+
+        ret = raft_apply(r, &req, bufs_cpy, n, mraft_apply_cb);
         if(ret != 0) {
             ABT_eventual_free(&ev);
+            for(unsigned i=0; i < n; i++) {
+                raft_free(bufs_cpy[i].base);
+            }
             return ret;
         }
         int* status = NULL;
@@ -149,12 +163,62 @@ int mraft_apply(struct raft *r,
         return 0;
     }
 
-    // TODO handle forwarding to leader
     raft_id     leader_id = 0;
     const char* leader_address = NULL;
     raft_leader(r, &leader_id, &leader_address);
 
-    return 0;
+    if(leader_id == 0) return RAFT_LEADERSHIPLOST;
+
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)r->io->impl;
+
+    hg_handle_t     h;
+    hg_return_t     hret;
+    hg_addr_t       addr = HG_ADDR_NULL;
+
+    hret = margo_addr_lookup(impl->mid, leader_address, &addr);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not resolve address %s: margo_addr_lookup returned %d",
+            leader_address, hret);
+        return MRAFT_ERR_FROM_MERCURY;
+    }
+
+    hret = margo_create(impl->mid, addr, impl->forward.apply_rpc_id, &h);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not create handle: margo_create returned %d", hret);
+        return MRAFT_ERR_FROM_MERCURY;
+    }
+
+    struct apply_in in = {
+        .n_bufs = n,
+        .bufs = (struct raft_buffer*)bufs
+    };
+
+    hret = margo_provider_forward(impl->provider_id, h, &in);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
+        return MRAFT_ERR_FROM_MERCURY;
+    }
+
+    mraft_apply_out_t out = {0};
+
+    hret = margo_get_output(h, &out);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could get output: margo_get_output returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    margo_free_output(h, &out);
+    margo_destroy(h);
+
+    ret = out.ret;
+
+finish:
+    return ret;
 }
 
 static void mraft_barrier_cb(struct raft_barrier *req, int status)

@@ -164,8 +164,9 @@ static inline int mraft_start(struct raft *r)
  * @brief Apply a command (series of buffers) to the state machine.
  *
  * Contrary to raft_apply, this function (1) is blocking until the
- * command has been applied, and (2) will attempt to forward the
- * command to the leader if this process is not the leader.
+ * command has been applied, (2) will attempt to forward the
+ * command to the leader if this process is not the leader, and
+ * (3) does not take ownership of the provided buffers.
  *
  * This function can still return RAFT_LEADERSHIPLOST if the calling
  * process does not know or could not reach the current leader (e.g.

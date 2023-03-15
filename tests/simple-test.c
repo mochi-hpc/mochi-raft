@@ -165,21 +165,18 @@ int main(int argc, char** argv)
 
     /* Start sending to the state machine */
     srand(rank+1);
-    if(raft_state(&raft) == RAFT_LEADER) {
-    for(unsigned i=0; i < 256; i++) {
+    for(unsigned i=0; i < 16; i++) {
         char c = 'A' + rank;
-        char* msg = raft_calloc(5, 1);
+        char msg[5];
         sprintf(msg, "%c%03d", 'A'+rank, i);
         struct raft_buffer buf = {.base = msg, .len = 5};
-        struct raft_apply apply = {0};
         fprintf(stderr, "[test] Sending %s\n", msg);
-        ret = raft_apply(&raft, &apply, &buf, 1, NULL);
+        ret = mraft_apply(&raft, &buf, 1);
         margo_assert(mid, ret == 0);
         int delay_ms = random() % 500;
         margo_thread_sleep(mid, delay_ms);
     }
-    }
-    margo_thread_sleep(mid, 2000);
+    margo_thread_sleep(mid, 5000);
     MPI_Barrier(MPI_COMM_WORLD);
 
     /* Finalize RAFT */

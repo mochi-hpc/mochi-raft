@@ -15,7 +15,15 @@ struct mraft_io_impl {
     uint16_t                provider_id;
     pcg32_random_t          rng_state;
     struct mraft_log*       log;
-    hg_id_t                 send_rpc_id;
+    hg_id_t                 craft_rpc_id;
+    struct {
+        hg_id_t apply_rpc_id;
+        hg_id_t barrier_rpc_id;
+        hg_id_t add_rpc_id;
+        hg_id_t assign_rpc_id;
+        hg_id_t remove_rpc_id;
+        hg_id_t transfer_rpc_id;
+    } forward;
     unsigned                tick_msec;
     ABT_thread              tick_ult;
     _Atomic raft_io_tick_cb tick_cb;

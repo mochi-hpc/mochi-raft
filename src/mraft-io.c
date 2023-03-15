@@ -9,8 +9,11 @@
 #include <stdlib.h>
 #include <margo.h>
 
-static DECLARE_MARGO_RPC_HANDLER(mraft_rpc_ult)
-static void mraft_rpc_ult(hg_handle_t h);
+static DECLARE_MARGO_RPC_HANDLER(mraft_craft_rpc_ult)
+static void mraft_craft_rpc_ult(hg_handle_t h);
+
+static DECLARE_MARGO_RPC_HANDLER(mraft_apply_rpc_ult)
+static void mraft_apply_rpc_ult(hg_handle_t h);
 
 static inline void free_server_list(struct raft_io *io)
 {
@@ -51,7 +54,6 @@ error:
     return RAFT_CANTBOOTSTRAP;
 }
 
-/* Initialize the backend with operational parameters such as server ID and address. */
 int mraft_io_impl_init(struct raft_io *io, raft_id id, const char *address)
 {
     (void)id;
@@ -62,27 +64,28 @@ int mraft_io_impl_init(struct raft_io *io, raft_id id, const char *address)
 
     hg_bool_t flag;
     hg_id_t rpc_id;
-    margo_provider_registered_name(impl->mid, "mraft_send", impl->provider_id, &rpc_id, &flag);
+    margo_provider_registered_name(impl->mid, "mraft_craft", impl->provider_id, &rpc_id, &flag);
     if(flag == HG_TRUE) {
         margo_error(impl->mid,
             "[mraft] An instance of mraft is already registered with provider id %u",
             impl->provider_id);
         return MRAFT_ERR_ID_USED;
     }
-    impl->send_rpc_id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_send",
-            mraft_send_in_t, void, mraft_rpc_ult, impl->provider_id, impl->pool);
-    margo_registered_disable_response(impl->mid, impl->send_rpc_id, HG_TRUE);
-    margo_register_data(impl->mid, impl->send_rpc_id, (void*)io, NULL);
+
+    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_craft",
+            mraft_craft_in_t, void, mraft_craft_rpc_ult, impl->provider_id, impl->pool);
+    margo_registered_disable_response(impl->mid, id, HG_TRUE);
+    margo_register_data(impl->mid, id, (void*)io, NULL);
+    impl->craft_rpc_id = id;
+
+    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_apply",
+            mraft_apply_in_t, mraft_apply_out_t, mraft_apply_rpc_ult, impl->provider_id, impl->pool);
+    margo_register_data(impl->mid, id, (void*)io, NULL);
+    impl->forward.apply_rpc_id = id;
 
     return MRAFT_SUCCESS;
 }
 
-/* Release all resources used by the backend.
- *
- * The tick and recv callbacks must not be invoked anymore, and pending asynchronous
- * requests be completed or canceled as soon as possible. Invoke the close callback
- * once the raft_io instance can be freed.
- */
 void mraft_io_impl_close(struct raft_io *io, raft_io_close_cb cb)
 {
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
@@ -96,24 +99,12 @@ void mraft_io_impl_close(struct raft_io *io, raft_io_close_cb cb)
         ABT_thread_free(&impl->tick_ult);
         impl->tick_ult = ABT_THREAD_NULL;
     }
-    margo_deregister(impl->mid, impl->send_rpc_id);
+    margo_deregister(impl->mid, impl->craft_rpc_id);
+    margo_deregister(impl->mid, impl->forward.apply_rpc_id);
     free_server_list(io);
     if(cb) cb(io);
 }
 
-/* Load persisted state from storage.
- *
- * The implementation must synchronously load the current state from its storage
- * backend and return information about it through the given pointers.
- *
- * The implementation can safely assume that this method will be invoked exactly
- * one time, before any call to raft_io.append() or c:func:raft_io.truncate(), and
- * then won’t be invoked again.
- *
- * The snapshot object and entries array must be allocated and populated using
- * raft_malloc(). If this function completes successfully, ownership of such memory
- * is transfered to the caller.
- */
 int mraft_io_impl_load(struct raft_io *io,
                     raft_term *term,
                     raft_id *voted_for,
@@ -144,12 +135,6 @@ static void ticker_ult(void* args)
     }
 }
 
-/* Start the backend.
- *
- * From now on the implementation must start accepting RPC requests and must invoke
- * the tick callback every msecs milliseconds. The recv callback must be invoked
- * when receiving a message.
- */
 int mraft_io_impl_start(struct raft_io *io,
                      unsigned msecs,
                      raft_io_tick_cb tick,
@@ -165,14 +150,6 @@ int mraft_io_impl_start(struct raft_io *io,
     return MRAFT_SUCCESS;
 }
 
-/* Bootstrap a server belonging to a new cluster.
- *
- * The implementation must synchronously persist the given configuration as the
- * first entry of the log. The current persisted term must be set to 1 and the vote to nil.
- *
- * If an attempt is made to bootstrap a server that has already some state,
- * then RAFT_CANTBOOTSTRAP must be returned.
- */
 int mraft_io_impl_bootstrap(struct raft_io *io, const struct raft_configuration *conf)
 {
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
@@ -190,7 +167,6 @@ int mraft_io_impl_bootstrap(struct raft_io *io, const struct raft_configuration 
     return (impl->log->bootstrap)(impl->log, conf);
 }
 
-/* Force appending a new configuration as last entry of the log. */
 int mraft_io_impl_recover(struct raft_io *io, const struct raft_configuration *conf)
 {
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
@@ -208,11 +184,6 @@ int mraft_io_impl_recover(struct raft_io *io, const struct raft_configuration *c
     return (impl->log->recover)(impl->log, conf);
 }
 
-/* Synchronously persist current term (and nil vote).
- *
- * The implementation MUST ensure that the change is durable before returning
- * (e.g. using fdatasync() or O_DSYNC).
- */
 int mraft_io_impl_set_term(struct raft_io *io, raft_term term)
 {
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
@@ -224,10 +195,6 @@ int mraft_io_impl_set_term(struct raft_io *io, raft_term term)
     return (impl->log->set_term)(impl->log, term);
 }
 
-/* Synchronously persist who we voted for.
- * The implementation MUST ensure that the change is durable before returning
- * (e.g. using fdatasync() or O_DSYNC).
- */
 int mraft_io_impl_set_vote(struct raft_io *io, raft_id server_id)
 {
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
@@ -239,11 +206,6 @@ int mraft_io_impl_set_vote(struct raft_io *io, raft_id server_id)
     return (impl->log->set_vote)(impl->log, server_id);
 }
 
-/* Asynchronously send an RPC message.
- *
- * The implementation is guaranteed that the memory referenced in the given message
- * will not be released until the cb callback is invoked.
- */
 int mraft_io_impl_send(struct raft_io *io,
                     struct raft_io_send *req,
                     const struct raft_message *message,
@@ -269,7 +231,7 @@ int mraft_io_impl_send(struct raft_io *io,
         return MRAFT_ERR_FROM_MERCURY;
     }
 
-    hret = margo_create(impl->mid, addr, impl->send_rpc_id, &h);
+    hret = margo_create(impl->mid, addr, impl->craft_rpc_id, &h);
     if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could not create handle: margo_create returned %d", hret);
@@ -309,11 +271,6 @@ static void append_ult(void* x)
     free(args);
 }
 
-/* Asynchronously append the given entries to the log.
- *
- * The implementation is guaranteed that the memory holding the given entries will
- * not be released until the cb callback is invoked.
- */
 int mraft_io_impl_append(struct raft_io *io,
                       struct raft_io_append *req,
                       const struct raft_entry entries[],
@@ -345,7 +302,6 @@ static void truncate_ult(void* x)
     free(args);
 }
 
-/* Asynchronously truncate all log entries from the given index onwards. */
 int mraft_io_impl_truncate(struct raft_io *io, raft_index index)
 {
     struct mraft_io_impl* impl    = (struct mraft_io_impl*)io->impl;
@@ -373,15 +329,6 @@ static void snapshot_put_ult(void* x)
     free(args);
 }
 
-/* Asynchronously persist a new snapshot. If the trailing parameter is greater
- * than zero, then all entries older that snapshot->index - trailing must be deleted.
- * If the trailing parameter is 0, then the snapshot completely replaces all existing
- * entries, which should all be deleted. Subsequent calls to append() should append
- * entries starting at index snapshot->index + 1.
- *
- * If a request is submitted, the raft engine won’t submit any other request until
- * the original one has completed.
- */
 int mraft_io_impl_snapshot_put(struct raft_io *io,
                             unsigned trailing,
                             struct raft_io_snapshot_put *req,
@@ -413,7 +360,6 @@ static void snapshot_get_ult(void* x)
     free(args);
 }
 
-/* Asynchronously load the last snapshot. */
 int mraft_io_impl_snapshot_get(struct raft_io *io,
                             struct raft_io_snapshot_get *req,
                             raft_io_snapshot_get_cb cb)
@@ -427,7 +373,6 @@ int mraft_io_impl_snapshot_get(struct raft_io *io,
     return ABT_thread_create(impl->pool, snapshot_get_ult, args, ABT_THREAD_ATTR_NULL, NULL);
 }
 
-/* Return the current time, expressed in milliseconds. */
 raft_time mraft_io_impl_time(struct raft_io *io)
 {
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
@@ -435,7 +380,6 @@ raft_time mraft_io_impl_time(struct raft_io *io)
     return t;
 }
 
-/* Generate a random integer between min and max. */
 int mraft_io_impl_random(struct raft_io *io, int min, int max)
 {
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
@@ -450,7 +394,6 @@ static void async_work_ult(void* args)
     if(req->cb) req->cb(req, status);
 }
 
-/* Submit work to be completed asynchronously */
 int mraft_io_impl_async_work(struct raft_io *io,
                           struct raft_io_async_work *req,
                           raft_io_async_work_cb cb)
@@ -460,8 +403,8 @@ int mraft_io_impl_async_work(struct raft_io *io,
     return ABT_thread_create(impl->pool, async_work_ult, req, ABT_THREAD_ATTR_NULL, NULL);
 }
 
-static DEFINE_MARGO_RPC_HANDLER(mraft_rpc_ult)
-static void mraft_rpc_ult(hg_handle_t h)
+static DEFINE_MARGO_RPC_HANDLER(mraft_craft_rpc_ult)
+static void mraft_craft_rpc_ult(hg_handle_t h)
 {
     hg_return_t hret;
     struct raft_message msg = {0};
@@ -521,6 +464,39 @@ static void mraft_rpc_ult(hg_handle_t h)
 
 finish:
     margo_free_input(h, &msg);
+    margo_destroy(h);
+}
+
+static DEFINE_MARGO_RPC_HANDLER(mraft_apply_rpc_ult)
+static void mraft_apply_rpc_ult(hg_handle_t h)
+{
+    hg_return_t hret;
+
+    margo_instance_id mid = margo_hg_handle_get_instance(h);
+    const struct hg_info* info = margo_get_info(h);
+    struct raft_io* io = (struct raft_io*)margo_registered_data(mid, info->id);
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
+
+    struct apply_in in = {0};
+    mraft_apply_out_t out = {0};
+
+    hret = margo_get_input(h, &in);
+    if(hret != HG_SUCCESS) {
+        margo_error(mid, "[mraft] Could not deserialize output (mercury error %d)", hret);
+        out.ret = RAFT_INVALID;
+        goto finish;
+    }
+
+    // from looking at the craft code, it sets io->data to the parent raft
+    struct raft* raft = (struct raft*)io->data;
+
+    margo_trace(impl->mid, "[mraft] Received forwarded apply request");
+
+    out.ret = mraft_apply(raft, in.bufs, in.n_bufs);
+
+finish:
+    margo_respond(h, &out);
+    margo_free_input(h, &in);
     margo_destroy(h);
 }
 

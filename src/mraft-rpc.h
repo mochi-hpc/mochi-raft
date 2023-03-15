@@ -187,9 +187,37 @@ static inline hg_return_t hg_proc_raft_message(hg_proc_t proc, struct raft_messa
     return HG_SUCCESS;
 }
 
-static inline hg_return_t hg_proc_mraft_send_in_t(hg_proc_t proc, void* arg)
+static inline hg_return_t hg_proc_mraft_craft_in_t(hg_proc_t proc, void* arg)
 {
     return hg_proc_raft_message(proc, (struct raft_message*)arg);
 }
+
+struct apply_in {
+    uint32_t            n_bufs;
+    struct raft_buffer* bufs;
+};
+
+static inline hg_return_t hg_proc_mraft_apply_in_t(hg_proc_t proc, void* arg)
+{
+    hg_return_t ret;
+    struct apply_in* in = (struct apply_in*)arg;
+    MRAFT_CHECK(hg_proc_uint32_t(proc, &in->n_bufs));
+    switch(hg_proc_get_op(proc)) {
+    case HG_DECODE:
+        in->bufs = (struct raft_buffer*)calloc(in->n_bufs, sizeof(*in->bufs));
+        break;
+    case HG_FREE:
+        break;
+    default:
+        break;
+    }
+    for(unsigned i=0; i < in->n_bufs; i++) {
+        MRAFT_CHECK(hg_proc_raft_buffer(proc, &in->bufs[i]));
+    }
+    return HG_SUCCESS;
+}
+
+MERCURY_GEN_PROC(mraft_apply_out_t,
+    ((uint32_t)(ret)))
 
 #endif
