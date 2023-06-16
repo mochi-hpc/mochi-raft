@@ -34,6 +34,9 @@ struct mraft_io_impl {
         char**     str_addr;
         hg_addr_t* hg_addr;
     } servers;
+#ifdef MRAFT_ENABLE_TESTS
+    _Atomic bool simulate_dead;
+#endif
 };
 
 int mraft_io_impl_init(struct raft_io *io, raft_id id, const char *address);
