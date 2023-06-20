@@ -146,12 +146,12 @@ void mraft_io_impl_close(struct raft_io *io, raft_io_close_cb cb)
 }
 
 int mraft_io_impl_load(struct raft_io *io,
-                    raft_term *term,
-                    raft_id *voted_for,
-                    struct raft_snapshot **snapshot,
-                    raft_index *start_index,
-                    struct raft_entry *entries[],
-                    size_t *n_entries)
+                       raft_term *term,
+                       raft_id *voted_for,
+                       struct raft_snapshot **snapshot,
+                       raft_index *start_index,
+                       struct raft_entry *entries[],
+                       size_t *n_entries)
 {
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Loading state from storage");
@@ -169,6 +169,9 @@ static void ticker_ult(void* args)
     margo_trace(impl->mid, "[mraft] Starting ticker ULT");
     raft_io_tick_cb tick = impl->tick_cb;
     while(tick) {
+#ifdef MRAFT_ENABLE_TESTS
+        if(!impl->simulate_dead)
+#endif
         tick(io);
         margo_thread_sleep(impl->mid, impl->tick_msec);
         tick = impl->tick_cb;
@@ -176,9 +179,9 @@ static void ticker_ult(void* args)
 }
 
 int mraft_io_impl_start(struct raft_io *io,
-                     unsigned msecs,
-                     raft_io_tick_cb tick,
-                     raft_io_recv_cb recv)
+                        unsigned msecs,
+                        raft_io_tick_cb tick,
+                        raft_io_recv_cb recv)
 {
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Starting raft");
@@ -247,14 +250,19 @@ int mraft_io_impl_set_vote(struct raft_io *io, raft_id server_id)
 }
 
 int mraft_io_impl_send(struct raft_io *io,
-                    struct raft_io_send *req,
-                    const struct raft_message *message,
-                    raft_io_send_cb cb)
+                       struct raft_io_send *req,
+                       const struct raft_message *message,
+                       raft_io_send_cb cb)
 {
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     hg_handle_t     h;
     hg_return_t     hret;
     hg_addr_t       addr = HG_ADDR_NULL;
+
+#ifdef MRAFT_ENABLE_TESTS
+    if(impl->simulate_dead)
+        return MRAFT_SUCCESS;
+#endif
 
     margo_trace(impl->mid,
         "[mraft] Sending message of type %d to server id %lu (%s)",
@@ -476,6 +484,9 @@ static void mraft_craft_rpc_ult(hg_handle_t h)
     margo_trace(mid, "[mraft] Received message of type %d from server id %lu (%s)",
                 msg.type, msg.server_id, msg.server_address);
     raft_io_recv_cb recv_cb = impl->recv_cb;
+#ifdef MRAFT_ENABLE_TESTS
+    if(!impl->simulate_dead)
+#endif
     if(recv_cb) {
         recv_cb(io, &msg);
         // this change in the message is necessary because the callback
@@ -691,3 +702,13 @@ finish:
     margo_destroy(h);
 }
 
+int mraft_io_simulate_dead(struct raft_io* io, bool dead)
+{
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
+#ifdef MRAFT_ENABLE_TESTS
+    impl->simulate_dead = dead;
+    return MRAFT_SUCCESS;
+#else
+    return RAFT_NOTFOUND;
+#endif
+}

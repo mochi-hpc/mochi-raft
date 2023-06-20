@@ -33,6 +33,9 @@ target_include_directories (mochi-raft BEFORE PUBLIC
 set_target_properties (mochi-raft
     PROPERTIES VERSION ${MRAFT_VERSION}
     SOVERSION ${MRAFT_VERSION_MAJOR})
+if (${ENABLE_TESTS})
+    target_compile_definitions (mochi-raft PRIVATE MRAFT_ENABLE_TESTS)
+endif ()
 
 if (${ENABLE_BEDROCK})
 # bedrock-module library
@@ -86,8 +89,7 @@ install (EXPORT mochi-raft-targets
 install (FILES "${CMAKE_CURRENT_BINARY_DIR}/mochi-raft-config.cmake"
                "${CMAKE_CURRENT_BINARY_DIR}/mochi-raft-config-version.cmake"
          DESTINATION ${mochi-raft-pkg} )
-install (DIRECTORY ../include/mochi-raft
-         DESTINATION include
-         FILES_MATCHING PATTERN "*.h")
+install (FILES ../include/mochi-raft.h
+         DESTINATION include)
 install (FILES "${CMAKE_CURRENT_BINARY_DIR}/mochi-raft.pc"
          DESTINATION "lib/pkgconfig/")
