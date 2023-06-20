@@ -26,6 +26,14 @@ struct mraft_log* memory_log_create();
  */
 void memory_log_free(struct mraft_log* log);
 
+/**
+ * @brief Function used for testing only.
+ * Reads the log entries from `log` into the given parameters
+ */
+void memory_log_get_entries(struct mraft_log*   log,
+                            struct raft_entry** entries,
+                            unsigned*           n_entries);
+
 #ifdef __cplusplus
 }
 #endif
