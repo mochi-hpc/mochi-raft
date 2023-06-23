@@ -23,6 +23,7 @@ struct mraft_io_impl {
         hg_id_t assign_rpc_id;
         hg_id_t remove_rpc_id;
         hg_id_t transfer_rpc_id;
+        hg_id_t get_raft_id_rpc_id;
     } forward;
     unsigned                tick_msec;
     ABT_thread              tick_ult;
