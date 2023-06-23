@@ -366,7 +366,7 @@ int mraft_add(struct raft *r,
         .address = address
     };
 
-    hret = margo_provider_forward(impl->provider_id, h, NULL);
+    hret = margo_provider_forward(impl->provider_id, h, &in);
     if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
@@ -448,7 +448,7 @@ int mraft_assign(struct raft *r,
         .role = role
     };
 
-    hret = margo_provider_forward(impl->provider_id, h, NULL);
+    hret = margo_provider_forward(impl->provider_id, h, &in);
     if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
@@ -528,7 +528,7 @@ int mraft_remove(struct raft *r,
         .id = id,
     };
 
-    hret = margo_provider_forward(impl->provider_id, h, NULL);
+    hret = margo_provider_forward(impl->provider_id, h, &in);
     if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
@@ -612,7 +612,7 @@ int mraft_transfer(struct raft *r,
         .id = id,
     };
 
-    hret = margo_provider_forward(impl->provider_id, h, NULL);
+    hret = margo_provider_forward(impl->provider_id, h, &in);
     if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
@@ -631,6 +631,62 @@ int mraft_transfer(struct raft *r,
     }
 
     ret = out.ret;
+
+finish:
+    margo_free_output(h, &out);
+    margo_destroy(h);
+    return ret;
+}
+
+int mraft_get_raft_id(struct raft *r,
+                      const char* address,
+                      raft_id* id)
+{
+    int ret = 0;
+
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)r->io->impl;
+
+    hg_handle_t     h = HG_HANDLE_NULL;
+    hg_return_t     hret;
+    hg_addr_t       addr = HG_ADDR_NULL;
+
+    hret = margo_addr_lookup(impl->mid, address, &addr);
+
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not resolve address %s: margo_addr_lookup returned %d",
+            address, hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    hret = margo_create(impl->mid, addr, impl->forward.get_raft_id_rpc_id, &h);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could not create handle: margo_create returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    hret = margo_provider_forward(impl->provider_id, h, NULL);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    mraft_get_raft_id_out_t out = {0};
+
+    hret = margo_get_output(h, &out);
+    if(hret != HG_SUCCESS) {
+        margo_error(impl->mid,
+            "[mraft] Could get output: margo_get_output returned %d", hret);
+        ret = MRAFT_ERR_FROM_MERCURY;
+        goto finish;
+    }
+
+    *id = out.id;
 
 finish:
     margo_free_output(h, &out);

@@ -37,15 +37,25 @@ extern "C" {
  */
 struct mraft_log {
     void* data;
-    int (*load)(struct mraft_log*, raft_term*, raft_id*, struct raft_snapshot**, raft_index*, struct raft_entry*[], size_t*);
+    int (*load)(struct mraft_log*,
+                raft_term*,
+                raft_id*,
+                struct raft_snapshot**,
+                raft_index*,
+                struct raft_entry*[],
+                size_t*);
     int (*bootstrap)(struct mraft_log*, const struct raft_configuration*);
     int (*recover)(struct mraft_log*, const struct raft_configuration*);
     int (*set_term)(struct mraft_log*, raft_term);
     int (*set_vote)(struct mraft_log*, raft_id);
     int (*append)(struct mraft_log*, const struct raft_entry[], unsigned);
     int (*truncate)(struct mraft_log*, raft_index);
-    int (*snapshot_put)(struct mraft_log*, unsigned, const struct raft_snapshot*);
-    int (*snapshot_get)(struct mraft_log*, struct raft_io_snapshot_get*, raft_io_snapshot_get_cb);
+    int (*snapshot_put)(struct mraft_log*,
+                        unsigned,
+                        const struct raft_snapshot*);
+    int (*snapshot_get)(struct mraft_log*,
+                        struct raft_io_snapshot_get*,
+                        raft_io_snapshot_get_cb);
 };
 
 /**
@@ -72,9 +82,8 @@ struct mraft_io_init_args {
  *
  * @return MRAFT_SUCCESS or other error code.
  */
-int mraft_io_init(
-    const struct mraft_io_init_args* args,
-    struct raft_io* raft_io);
+int mraft_io_init(const struct mraft_io_init_args* args,
+                  struct raft_io*                  raft_io);
 
 /**
  * @brief Finalize the raft_io structure. This function may be called
@@ -92,11 +101,11 @@ int mraft_io_finalize(struct raft_io* raft_io);
 /**
  * @see raft_init
  */
-static inline int mraft_init(struct raft* r,
-                             struct raft_io* io,
+static inline int mraft_init(struct raft*     r,
+                             struct raft_io*  io,
                              struct raft_fsm* fsm,
-                             raft_id id,
-                             const char* address)
+                             raft_id          id,
+                             const char*      address)
 {
     return raft_init(r, io, fsm, id, address);
 }
@@ -116,12 +125,11 @@ void mraft_close(struct raft* r);
 /**
  * @see raft_bootstrap.
  */
-static inline int mraft_bootstrap(struct raft *r,
-                                  const struct raft_configuration *conf)
+static inline int mraft_bootstrap(struct raft*                     r,
+                                  const struct raft_configuration* conf)
 {
     return raft_bootstrap(r, conf);
 }
-
 
 /**
  * @brief Declaration to avoid including ssg.h if mochi-raft has not been
@@ -140,14 +148,13 @@ typedef uint64_t ssg_group_id_t;
  *
  * @return 0 or other MRAFT error codes.
  */
-int mraft_bootstrap_from_ssg(struct raft* r,
-                             ssg_group_id_t gid);
+int mraft_bootstrap_from_ssg(struct raft* r, ssg_group_id_t gid);
 
 /**
  * @see raft_recover.
  */
-static inline int mraft_recover(struct raft *r,
-                                const struct raft_configuration *conf)
+static inline int mraft_recover(struct raft*                     r,
+                                const struct raft_configuration* conf)
 {
     return raft_recover(r, conf);
 }
@@ -155,10 +162,7 @@ static inline int mraft_recover(struct raft *r,
 /**
  * @see raft_start.
  */
-static inline int mraft_start(struct raft *r)
-{
-    return raft_start(r);
-}
+static inline int mraft_start(struct raft* r) { return raft_start(r); }
 
 /**
  * @brief Apply a command (series of buffers) to the state machine.
@@ -179,9 +183,9 @@ static inline int mraft_start(struct raft *r)
  *
  * @return 0 or other MRAFT error codes.
  */
-int mraft_apply(struct raft *r,
+int mraft_apply(struct raft*             r,
                 const struct raft_buffer bufs[],
-                const unsigned n);
+                const unsigned           n);
 
 /**
  * @brief Propose to append a log entry of type RAFT_BARRIER.
@@ -200,7 +204,7 @@ int mraft_apply(struct raft *r,
  *
  * @return 0 or other MRAFT error codes.
  */
-int mraft_barrier(struct raft *r);
+int mraft_barrier(struct raft* r);
 
 /**
  * @brief Add a new server to the cluster configuration.
@@ -215,9 +219,7 @@ int mraft_barrier(struct raft *r);
  *
  * @return 0 or other MRAFT error codes.
  */
-int mraft_add(struct raft *r,
-              raft_id id,
-              const char *address);
+int mraft_add(struct raft* r, raft_id id, const char* address);
 
 /**
  * @brief Assign a new role to the given server.
@@ -234,9 +236,7 @@ int mraft_add(struct raft *r,
  *
  * @return 0 or other MRAFT error codes.
  */
-int mraft_assign(struct raft *r,
-                 raft_id id,
-                 int role);
+int mraft_assign(struct raft* r, raft_id id, int role);
 
 /**
  * @brief Remove a a process from the cluster.
@@ -249,8 +249,7 @@ int mraft_assign(struct raft *r,
  *
  * @return 0 or other MRAFT error codes.
  */
-int mraft_remove(struct raft *r,
-                 raft_id id);
+int mraft_remove(struct raft* r, raft_id id);
 
 /**
  * @brief Transfer leadership to the server with the given ID.
@@ -264,9 +263,21 @@ int mraft_remove(struct raft *r,
  *
  * @return 0 or other MRAFT error codes.
  */
-int mraft_transfer(struct raft *r,
-                   raft_id id);
+int mraft_transfer(struct raft* r, raft_id id);
 
+/**
+ * @brief Get the raft ID of the server with the give address.
+ *
+ * Similarly to mraft_apply, this function is blocking and can be
+ * called by processes other than the leader.
+ *
+ * @param r Raft instance.
+ * @param Address of the server we want the raft ID of
+ * @param id Pointer to store the requested server's raft ID
+ *
+ * @return 0 or other MRAFT error codes.
+ */
+int mraft_get_raft_id(struct raft* r, const char* address, raft_id* id);
 
 #ifdef __cplusplus
 }

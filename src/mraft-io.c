@@ -30,6 +30,9 @@ static void mraft_remove_rpc_ult(hg_handle_t h);
 static DECLARE_MARGO_RPC_HANDLER(mraft_transfer_rpc_ult)
 static void mraft_transfer_rpc_ult(hg_handle_t h);
 
+static DECLARE_MARGO_RPC_HANDLER(mraft_get_raft_id_rpc_ult)
+static void mraft_get_raft_id_rpc_ult(hg_handle_t h);
+
 static inline void free_server_list(struct raft_io *io)
 {
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
@@ -122,6 +125,11 @@ int mraft_io_impl_init(struct raft_io *io, raft_id id, const char *address)
             mraft_transfer_in_t, mraft_transfer_out_t, mraft_transfer_rpc_ult, impl->provider_id, impl->pool);
     margo_register_data(impl->mid, id, (void*)io, NULL);
     impl->forward.transfer_rpc_id = id;
+
+    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_get_raft_id",
+        void, mraft_get_raft_id_out_t, mraft_get_raft_id_rpc_ult, impl->provider_id, impl->pool);
+    margo_register_data(impl->mid, id, (void*)io, NULL);
+    impl->forward.get_raft_id_rpc_id = id;
 
     return MRAFT_SUCCESS;
 }
@@ -477,8 +485,9 @@ static void mraft_craft_rpc_ult(hg_handle_t h)
         }
     }
     if(!msg.server_address) {
-        margo_warning(mid, "[mraft] Ignoring RPC received from an unknown server");
-        goto finish;
+        margo_warning(mid, "[mraft] RPC received from an unknown server");
+        // margo_warning(mid, "[mraft] Ignoring RPC received from an unknown server");
+        // goto finish;
     }
 
     margo_trace(mid, "[mraft] Received message of type %d from server id %lu (%s)",
@@ -692,13 +701,35 @@ static void mraft_transfer_rpc_ult(hg_handle_t h)
 
     struct raft* raft = (struct raft*)io->data;
 
-    margo_trace(impl->mid, "[mraft] Received forwarded remove request");
+    margo_trace(impl->mid, "[mraft] Received forwarded transfer request");
 
     out.ret = mraft_transfer(raft, in.id);
 
 finish:
     margo_respond(h, &out);
     margo_free_input(h, &in);
+    margo_destroy(h);
+}
+
+static DEFINE_MARGO_RPC_HANDLER(mraft_get_raft_id_rpc_ult)
+static void mraft_get_raft_id_rpc_ult(hg_handle_t h)
+{
+    hg_return_t hret;
+
+    margo_instance_id mid = margo_hg_handle_get_instance(h);
+    const struct hg_info* info = margo_get_info(h);
+    struct raft_io* io = (struct raft_io*)margo_registered_data(mid, info->id);
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
+
+    mraft_get_raft_id_out_t out = {0};
+
+    struct raft* raft = (struct raft*)io->data;
+
+    margo_trace(impl->mid, "[mraft] Received forwarded get_raft_id request");
+
+    out.id = raft->id;
+
+    margo_respond(h, &out);
     margo_destroy(h);
 }
 
