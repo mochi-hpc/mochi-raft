@@ -249,4 +249,7 @@ MERCURY_GEN_PROC(mraft_transfer_in_t,
 MERCURY_GEN_PROC(mraft_transfer_out_t,
     ((uint32_t)(ret)))
 
+MERCURY_GEN_PROC(mraft_get_raft_id_out_t,
+    ((raft_id)(id)))
+
 #endif
