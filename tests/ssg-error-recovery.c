@@ -153,7 +153,10 @@ static void my_membership_update_cb(void*                    group_data,
 
     switch (update_type) {
     case SSG_MEMBER_JOINED:
+<<<<<<< HEAD
         fprintf(stderr, "[test] [debug] member joined SSG group\n");
+=======
+>>>>>>> e2b5470 (WIP(): error recovery test using only ssg (and no longer openmpi))
         /* The leader must add this new process to the raft cluster.
            He must get the joining process' raft ID */
         if (self_raft_id == leader_id) {
@@ -182,6 +185,7 @@ static void my_membership_update_cb(void*                    group_data,
             ret = mraft_assign(raft, joiner_raft_id, RAFT_VOTER);
             margo_assert(mid, ret == 0);
 
+<<<<<<< HEAD
             fprintf(stderr,
                     "[test] [debug] raft server(id=%llu, addr='%s') added\n",
                     joiner_raft_id, joiner_addr);
@@ -194,6 +198,13 @@ static void my_membership_update_cb(void*                    group_data,
     case SSG_MEMBER_DIED:
         fprintf(stderr, "[test] [debug] died and left SSG group\n");
         break;
+=======
+            break;
+        }
+
+    case SSG_MEMBER_LEFT:
+    case SSG_MEMBER_DIED:
+>>>>>>> e2b5470 (WIP(): error recovery test using only ssg (and no longer openmpi))
         /* TODO: Get the raft-id of the process that just left */
         /* Remove the member from the raft cluster */
         // ret = mraft_remove(raft, self_raft_id);
@@ -405,6 +416,7 @@ int main(int argc, char** argv)
                 raft_state(&raft));
 
     /* Start sending to the state machine */
+<<<<<<< HEAD
     // srand(self_raft_id + 1);
     // if (self_raft_id == leader_id) {  /* Only leader sends to FSM */
     //     for (unsigned i = 0; i < 16; i++) {
@@ -420,6 +432,22 @@ int main(int argc, char** argv)
     //         margo_thread_sleep(mid, delay_ms);
     //     }
     // }
+=======
+    srand(self_raft_id + 1);
+    if (self_raft_id == leader_id) {  /* Only leader sends to FSM */
+        for (unsigned i = 0; i < 16; i++) {
+            char msg[20 + 3 + 1 + 1]; /* 20 for self_raft_id (ULL), 3 for i
+                                         (unsigned), 1 for '-' and 1 for '\0' */
+            sprintf(msg, "%020llu-%03d", self_raft_id, i);
+            struct raft_buffer buf = {.base = msg, .len = 25};
+            fprintf(stderr, "[test] Sending %s\n", msg);
+            ret = mraft_apply(&raft, &buf, 1);
+            margo_assert(mid, ret == 0);
+            int delay_ms = random() % 500;
+            margo_thread_sleep(mid, delay_ms);
+        }
+    }
+>>>>>>> e2b5470 (WIP(): error recovery test using only ssg (and no longer openmpi))
     margo_thread_sleep(mid, 5000);
 
     /* Print all log values */
