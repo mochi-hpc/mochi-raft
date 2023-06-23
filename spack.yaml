@@ -4,7 +4,7 @@ spack:
   - pkg-config
   - uuid
   - c-raft
-  - mochi-margo ^mercury~boostsys
+  - mochi-margo ^mercury~boostsys ^libfabric fabrics=tcp,rxm
   - mochi-abt-io
   - json-c
   - mochi-bedrock
