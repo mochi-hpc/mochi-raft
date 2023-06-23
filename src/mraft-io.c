@@ -94,6 +94,11 @@ int mraft_io_impl_init(struct raft_io *io, raft_id id, const char *address)
     impl->self_id      = id;
     impl->self_address = strdup(address);
 
+    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_get_raft_id",
+        void, mraft_get_raft_id_out_t, mraft_get_raft_id_rpc_ult, impl->provider_id, impl->pool);
+    margo_register_data(impl->mid, id, (void*)io, NULL);
+    impl->forward.get_raft_id_rpc_id = id;
+
     return MRAFT_SUCCESS;
 }
 
