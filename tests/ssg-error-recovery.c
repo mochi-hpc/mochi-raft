@@ -109,9 +109,10 @@ parse_args(int argc, char** argv, char** ssg_path, bool* join, raft_id* raft_id)
 }
 
 struct membership_update_arg {
-    struct raft* raft;
-    raft_id      self_raft_id;
-    char*        self_addr;
+    struct raft*   raft;         /* The server's raft instance */
+    raft_id        self_raft_id; /* The server's raft ID */
+    char*          self_addr;    /* The server's address */
+    ssg_group_id_t gid;          /* The SSG group ID */
 };
 
 /**
@@ -131,9 +132,10 @@ static void my_membership_update_cb(void*                    group_data,
     /* Get the raft structure and the self id from the group data */
     struct membership_update_arg* gd
         = (struct membership_update_arg*)group_data;
-    struct raft* raft         = gd->raft;
-    raft_id      self_raft_id = gd->self_raft_id;
-    char*        self_addr    = gd->self_addr;
+    struct raft*   raft         = gd->raft;
+    raft_id        self_raft_id = gd->self_raft_id;
+    char*          self_addr    = gd->self_addr;
+    ssg_group_id_t gid          = gd->gid;
 
     /* Get the margo instance id from the raft structure */
     margo_instance_id mid = (margo_instance_id)raft->io->impl;
@@ -147,11 +149,16 @@ static void my_membership_update_cb(void*                    group_data,
     switch (update_type) {
     case SSG_MEMBER_JOINED:
         /* The leader must add this new process to the raft cluster.
-           He must get the joining process' raft-id */
+           He must get the joining process' raft ID */
         if (self_raft_id == leader_id) {
-            /* TODO: Send RPC to ask for raft-id, and self_addr */
+            /* Get the address of the joining server */
+            char* joiner_addr;
+            ssg_get_group_member_addr_str(gid, member_id, &joiner_addr);
+
+            /* Send RPC to ask for raft-id of joining server */
             raft_id joiner_raft_id;
-            char*   joiner_addr;
+            ret = mraft_get_raft_id(raft, joiner_addr, &joiner_raft_id);
+            margo_assert(mid, ret == 0);
 
             /* Add this process to the raft cluster */
             ret = mraft_add(raft, joiner_raft_id, joiner_addr);
@@ -171,8 +178,8 @@ static void my_membership_update_cb(void*                    group_data,
         /* Remove the member from the raft cluster */
         // ret = mraft_remove(raft, self_raft_id);
         // margo_assert(mid, ret == 0);
-        // break;
         // fprintf(stderr, "============= Remove raft done ============\n");
+        break;
     default:
         /* Unknown update type, ignore it */
         break;
@@ -183,17 +190,16 @@ static void my_membership_update_cb(void*                    group_data,
  * @brief Create an load an ssg group into the file at `ssg_path`.
  * @param mid The margo instance ID
  * @param ssg_path The path to the group file
- * @param gid Pointer to store the created group ID
  * @param arg The argument to pass to the membership update callback function
  * for the ssg group
  * @return 0 upon success, -1 upon failure
  */
 static int _create_ssg_group(margo_instance_id             mid,
                              const char*                   ssg_path,
-                             ssg_group_id_t*               gid,
                              struct membership_update_arg* arg)
 {
-    int ret;
+    int            ret;
+    ssg_group_id_t gid;
 
     /* Default configuration for SSG group */
     ssg_group_config_t config            = {.swim_period_length_ms        = 1000,
@@ -203,11 +209,18 @@ static int _create_ssg_group(margo_instance_id             mid,
                                             .ssg_credential               = -1};
     const char*        group_addr_strs[] = {arg->self_addr};
 
-    ret = ssg_group_create(mid, "mygroup", group_addr_strs, 1, &config,
-                           my_membership_update_cb, (void*)arg, gid);
+    /* We dont pass the callback yet, because we need to add the SSG group ID to
+     * `arg` */
+    ret = ssg_group_create(mid, "mygroup", group_addr_strs, 1, &config, NULL,
+                           NULL, &gid);
     margo_assert(mid, ret == SSG_SUCCESS);
 
-    ret = ssg_group_id_store(ssg_path, *gid, 1);
+    /* Add callback now that we have the SSG group ID */
+    arg->gid = gid;
+    ssg_group_add_membership_update_callback(gid, my_membership_update_cb,
+                                             (void*)arg);
+
+    ret = ssg_group_id_store(ssg_path, gid, 1);
     margo_assert(mid, ret == SSG_SUCCESS);
 
     return 0;
@@ -217,25 +230,25 @@ static int _create_ssg_group(margo_instance_id             mid,
  * @brief Join the ssg group specified in the group file at ssg_path
  * @param mid The margo instance ID
  * @param ssg_path The path to the group file
- * @param gid Pointer to store the created group ID
  * @param arg The argument to pass to the membership update callback function
  * for the ssg group
  * @return 0 upon success, -1 upon failure
  */
 static int _join_ssg_group(margo_instance_id             mid,
                            const char*                   ssg_path,
-                           ssg_group_id_t*               gid,
                            struct membership_update_arg* arg)
 {
-    int ret;
+    int            ret;
+    ssg_group_id_t gid;
 
     /* Load the group from the ssg file */
     int num_addrs = 1;
-    ret           = ssg_group_id_load(ssg_path, &num_addrs, gid);
+    ret           = ssg_group_id_load(ssg_path, &num_addrs, &gid);
     margo_assert(mid, ret == SSG_SUCCESS);
 
     /* Join the ssg group */
-    ret = ssg_group_join(mid, *gid, my_membership_update_cb, (void*)arg);
+    arg->gid = gid;
+    ret      = ssg_group_join(mid, gid, my_membership_update_cb, (void*)arg);
     margo_assert(mid, ret == SSG_SUCCESS);
 
     return 0;
@@ -325,12 +338,12 @@ int main(int argc, char** argv)
         .raft         = &raft,
         .self_addr    = self_addr,
         .self_raft_id = self_raft_id,
+        .gid          = 0, /* Not set yet */
     };
-    ssg_group_id_t gid;
     if (join)
-        _join_ssg_group(mid, ssg_path, &gid, &arg);
+        _join_ssg_group(mid, ssg_path, &arg);
     else
-        _create_ssg_group(mid, ssg_path, &gid, &arg);
+        _create_ssg_group(mid, ssg_path, &arg);
 
     margo_thread_sleep(mid, 2000);
 
@@ -378,8 +391,12 @@ int main(int argc, char** argv)
     /* Finalize the state machine */
     free(myfsm.content);
 
+    /* Leave the SSG group */
+    ret = ssg_group_leave(arg.gid);
+    margo_assert(mid, ret == SSG_SUCCESS);
+
     /* Finalize SSG */
-    ret = ssg_group_destroy(gid);
+    ret = ssg_group_destroy(arg.gid);
     margo_assert(mid, ret == SSG_SUCCESS);
 
     ret = ssg_finalize();
