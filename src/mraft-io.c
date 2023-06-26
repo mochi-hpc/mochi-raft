@@ -485,8 +485,9 @@ static void mraft_craft_rpc_ult(hg_handle_t h)
         }
     }
     if(!msg.server_address) {
-        margo_warning(mid, "[mraft] Ignoring RPC received from an unknown server");
-        goto finish;
+        margo_warning(mid, "[mraft] RPC received from an unknown server");
+        // margo_warning(mid, "[mraft] Ignoring RPC received from an unknown server");
+        // goto finish;
     }
 
     margo_trace(mid, "[mraft] Received message of type %d from server id %lu (%s)",
