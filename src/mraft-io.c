@@ -33,45 +33,6 @@ static void mraft_transfer_rpc_ult(hg_handle_t h);
 static DECLARE_MARGO_RPC_HANDLER(mraft_get_raft_id_rpc_ult)
 static void mraft_get_raft_id_rpc_ult(hg_handle_t h);
 
-static inline void free_server_list(struct raft_io *io)
-{
-    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
-    for(unsigned i=0; i < impl->servers.count; i++) {
-        free(impl->servers.str_addr[i]);
-        margo_addr_free(impl->mid, impl->servers.hg_addr[i]);
-    }
-    free(impl->servers.ids);
-    free(impl->servers.str_addr);
-    free(impl->servers.hg_addr);
-    impl->servers.count    = 0;
-    impl->servers.ids      = NULL;
-    impl->servers.str_addr = NULL;
-    impl->servers.hg_addr  = NULL;
-}
-
-static inline int populate_server_list(struct raft_io *io, const struct raft_configuration *conf)
-{
-    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
-
-    impl->servers.count    = conf->n;
-    impl->servers.ids      = calloc(conf->n, sizeof(*impl->servers.ids));
-    impl->servers.str_addr = calloc(conf->n, sizeof(*impl->servers.str_addr));
-    impl->servers.hg_addr  = calloc(conf->n, sizeof(*impl->servers.hg_addr));
-
-    for(unsigned i=0; i < conf->n; i++) {
-        impl->servers.ids[i]      = conf->servers[i].id;
-        impl->servers.str_addr[i] = strdup(conf->servers[i].address);
-        hg_return_t ret = margo_addr_lookup(impl->mid, conf->servers[i].address, &impl->servers.hg_addr[i]);
-        if(ret != HG_SUCCESS) goto error;
-    }
-
-    return MRAFT_SUCCESS;
-
-error:
-    free_server_list(io);
-    return RAFT_CANTBOOTSTRAP;
-}
-
 int mraft_io_impl_init(struct raft_io *io, raft_id id, const char *address)
 {
     (void)address;
@@ -157,7 +118,6 @@ void mraft_io_impl_close(struct raft_io *io, raft_io_close_cb cb)
     margo_deregister(impl->mid, impl->forward.remove_rpc_id);
     margo_deregister(impl->mid, impl->forward.transfer_rpc_id);
     margo_deregister(impl->mid, impl->get_raft_id_rpc_id);
-    free_server_list(io);
     free(impl->self_address);
     if(cb) cb(io);
 }
@@ -218,12 +178,6 @@ int mraft_io_impl_bootstrap(struct raft_io *io, const struct raft_configuration 
         margo_error(impl->mid, "[mraft] bootstrap function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
     }
-    if(impl->servers.count != 0) return RAFT_CANTBOOTSTRAP;
-    int ret = populate_server_list(io, conf);
-    if(ret != 0) {
-        margo_error(impl->mid, "[mraft] Could not populate server list from configuration");
-        return ret;
-    }
     return (impl->log->bootstrap)(impl->log, conf);
 }
 
@@ -234,12 +188,6 @@ int mraft_io_impl_recover(struct raft_io *io, const struct raft_configuration *c
     if(!impl->log->recover) {
         margo_error(impl->mid, "[mraft] recover function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
-    }
-    free_server_list(io);
-    int ret = populate_server_list(io, conf);
-    if(ret != 0) {
-        margo_error(impl->mid, "[mraft] Could not populate server list from configuration");
-        return ret;
     }
     return (impl->log->recover)(impl->log, conf);
 }
