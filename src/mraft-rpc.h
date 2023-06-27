@@ -169,6 +169,8 @@ static inline hg_return_t hg_proc_raft_timeout_now(hg_proc_t proc, struct raft_t
 static inline hg_return_t hg_proc_raft_message(hg_proc_t proc, struct raft_message* msg)
 {
     hg_return_t ret = HG_SUCCESS;
+    MRAFT_CHECK(hg_proc_raft_id(proc, &msg->server_id));
+    MRAFT_CHECK(hg_proc_hg_const_string_t(proc, &msg->server_address));
     MRAFT_CHECK(hg_proc_uint16_t(proc, &msg->type));
     switch(msg->type) {
     case RAFT_IO_APPEND_ENTRIES:

@@ -660,7 +660,7 @@ int mraft_get_raft_id(struct raft *r,
         goto finish;
     }
 
-    hret = margo_create(impl->mid, addr, impl->forward.get_raft_id_rpc_id, &h);
+    hret = margo_create(impl->mid, addr, impl->get_raft_id_rpc_id, &h);
     if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could not create handle: margo_create returned %d", hret);
