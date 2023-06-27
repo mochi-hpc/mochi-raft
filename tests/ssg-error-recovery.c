@@ -187,7 +187,6 @@ static void my_membership_update_cb(void*                    group_data,
                     joiner_raft_id, joiner_addr);
         }
         break;
-
     case SSG_MEMBER_LEFT:
         fprintf(stderr, "[test] [debug] member left SSG group\n");
         break;
@@ -380,7 +379,6 @@ int main(int argc, char** argv)
     ret = mraft_start(&raft);
     margo_assert(mid, ret == 0);
     fprintf(stderr, "============= Start done ============\n");
-
     margo_thread_sleep(mid, 2000);
 
     /* Create or join the SSG group */
@@ -420,7 +418,7 @@ int main(int argc, char** argv)
     //         margo_thread_sleep(mid, delay_ms);
     //     }
     // }
-    margo_thread_sleep(mid, 5000);
+    margo_thread_sleep(mid, 10000);
 
     /* Print all log values */
     check_log_values(self_raft_id, log);
