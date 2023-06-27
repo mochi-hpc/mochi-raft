@@ -33,48 +33,8 @@ static void mraft_transfer_rpc_ult(hg_handle_t h);
 static DECLARE_MARGO_RPC_HANDLER(mraft_get_raft_id_rpc_ult)
 static void mraft_get_raft_id_rpc_ult(hg_handle_t h);
 
-static inline void free_server_list(struct raft_io *io)
-{
-    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
-    for(unsigned i=0; i < impl->servers.count; i++) {
-        free(impl->servers.str_addr[i]);
-        margo_addr_free(impl->mid, impl->servers.hg_addr[i]);
-    }
-    free(impl->servers.ids);
-    free(impl->servers.str_addr);
-    free(impl->servers.hg_addr);
-    impl->servers.count    = 0;
-    impl->servers.ids      = NULL;
-    impl->servers.str_addr = NULL;
-    impl->servers.hg_addr  = NULL;
-}
-
-static inline int populate_server_list(struct raft_io *io, const struct raft_configuration *conf)
-{
-    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
-
-    impl->servers.count    = conf->n;
-    impl->servers.ids      = calloc(conf->n, sizeof(*impl->servers.ids));
-    impl->servers.str_addr = calloc(conf->n, sizeof(*impl->servers.str_addr));
-    impl->servers.hg_addr  = calloc(conf->n, sizeof(*impl->servers.hg_addr));
-
-    for(unsigned i=0; i < conf->n; i++) {
-        impl->servers.ids[i]      = conf->servers[i].id;
-        impl->servers.str_addr[i] = strdup(conf->servers[i].address);
-        hg_return_t ret = margo_addr_lookup(impl->mid, conf->servers[i].address, &impl->servers.hg_addr[i]);
-        if(ret != HG_SUCCESS) goto error;
-    }
-
-    return MRAFT_SUCCESS;
-
-error:
-    free_server_list(io);
-    return RAFT_CANTBOOTSTRAP;
-}
-
 int mraft_io_impl_init(struct raft_io *io, raft_id id, const char *address)
 {
-    (void)id;
     (void)address;
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
 
@@ -90,46 +50,49 @@ int mraft_io_impl_init(struct raft_io *io, raft_id id, const char *address)
         return MRAFT_ERR_ID_USED;
     }
 
-    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_craft",
+    rpc_id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_craft",
             mraft_craft_in_t, void, mraft_craft_rpc_ult, impl->provider_id, impl->pool);
-    margo_registered_disable_response(impl->mid, id, HG_TRUE);
-    margo_register_data(impl->mid, id, (void*)io, NULL);
-    impl->craft_rpc_id = id;
+    margo_registered_disable_response(impl->mid, rpc_id, HG_TRUE);
+    margo_register_data(impl->mid, rpc_id, (void*)io, NULL);
+    impl->craft_rpc_id = rpc_id;
 
-    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_apply",
+    rpc_id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_apply",
             mraft_apply_in_t, mraft_apply_out_t, mraft_apply_rpc_ult, impl->provider_id, impl->pool);
-    margo_register_data(impl->mid, id, (void*)io, NULL);
-    impl->forward.apply_rpc_id = id;
+    margo_register_data(impl->mid, rpc_id, (void*)io, NULL);
+    impl->forward.apply_rpc_id = rpc_id;
 
-    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_barrier",
+    rpc_id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_barrier",
             void, mraft_barrier_out_t, mraft_barrier_rpc_ult, impl->provider_id, impl->pool);
-    margo_register_data(impl->mid, id, (void*)io, NULL);
-    impl->forward.barrier_rpc_id = id;
+    margo_register_data(impl->mid, rpc_id, (void*)io, NULL);
+    impl->forward.barrier_rpc_id = rpc_id;
 
-    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_add",
+    rpc_id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_add",
             mraft_add_in_t, mraft_add_out_t, mraft_add_rpc_ult, impl->provider_id, impl->pool);
-    margo_register_data(impl->mid, id, (void*)io, NULL);
-    impl->forward.add_rpc_id = id;
+    margo_register_data(impl->mid, rpc_id, (void*)io, NULL);
+    impl->forward.add_rpc_id = rpc_id;
 
-    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_assign",
+    rpc_id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_assign",
             mraft_assign_in_t, mraft_assign_out_t, mraft_assign_rpc_ult, impl->provider_id, impl->pool);
-    margo_register_data(impl->mid, id, (void*)io, NULL);
-    impl->forward.assign_rpc_id = id;
+    margo_register_data(impl->mid, rpc_id, (void*)io, NULL);
+    impl->forward.assign_rpc_id = rpc_id;
 
-    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_remove",
+    rpc_id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_remove",
             mraft_remove_in_t, mraft_remove_out_t, mraft_remove_rpc_ult, impl->provider_id, impl->pool);
-    margo_register_data(impl->mid, id, (void*)io, NULL);
-    impl->forward.remove_rpc_id = id;
+    margo_register_data(impl->mid, rpc_id, (void*)io, NULL);
+    impl->forward.remove_rpc_id = rpc_id;
 
-    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_transfer",
+    rpc_id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_transfer",
             mraft_transfer_in_t, mraft_transfer_out_t, mraft_transfer_rpc_ult, impl->provider_id, impl->pool);
-    margo_register_data(impl->mid, id, (void*)io, NULL);
-    impl->forward.transfer_rpc_id = id;
+    margo_register_data(impl->mid, rpc_id, (void*)io, NULL);
+    impl->forward.transfer_rpc_id = rpc_id;
 
-    id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_get_raft_id",
+    rpc_id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_get_raft_id",
         void, mraft_get_raft_id_out_t, mraft_get_raft_id_rpc_ult, impl->provider_id, impl->pool);
-    margo_register_data(impl->mid, id, (void*)io, NULL);
-    impl->forward.get_raft_id_rpc_id = id;
+    margo_register_data(impl->mid, rpc_id, (void*)io, NULL);
+    impl->get_raft_id_rpc_id = rpc_id;
+
+    impl->self_id      = id;
+    impl->self_address = strdup(address);
 
     return MRAFT_SUCCESS;
 }
@@ -149,7 +112,13 @@ void mraft_io_impl_close(struct raft_io *io, raft_io_close_cb cb)
     }
     margo_deregister(impl->mid, impl->craft_rpc_id);
     margo_deregister(impl->mid, impl->forward.apply_rpc_id);
-    free_server_list(io);
+    margo_deregister(impl->mid, impl->forward.barrier_rpc_id);
+    margo_deregister(impl->mid, impl->forward.add_rpc_id);
+    margo_deregister(impl->mid, impl->forward.assign_rpc_id);
+    margo_deregister(impl->mid, impl->forward.remove_rpc_id);
+    margo_deregister(impl->mid, impl->forward.transfer_rpc_id);
+    margo_deregister(impl->mid, impl->get_raft_id_rpc_id);
+    free(impl->self_address);
     if(cb) cb(io);
 }
 
@@ -209,12 +178,6 @@ int mraft_io_impl_bootstrap(struct raft_io *io, const struct raft_configuration 
         margo_error(impl->mid, "[mraft] bootstrap function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
     }
-    if(impl->servers.count != 0) return RAFT_CANTBOOTSTRAP;
-    int ret = populate_server_list(io, conf);
-    if(ret != 0) {
-        margo_error(impl->mid, "[mraft] Could not populate server list from configuration");
-        return ret;
-    }
     return (impl->log->bootstrap)(impl->log, conf);
 }
 
@@ -225,12 +188,6 @@ int mraft_io_impl_recover(struct raft_io *io, const struct raft_configuration *c
     if(!impl->log->recover) {
         margo_error(impl->mid, "[mraft] recover function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
-    }
-    free_server_list(io);
-    int ret = populate_server_list(io, conf);
-    if(ret != 0) {
-        margo_error(impl->mid, "[mraft] Could not populate server list from configuration");
-        return ret;
     }
     return (impl->log->recover)(impl->log, conf);
 }
@@ -272,9 +229,13 @@ int mraft_io_impl_send(struct raft_io *io,
         return MRAFT_SUCCESS;
 #endif
 
+    struct raft_message in = *message;
+    in.server_id      = impl->self_id;
+    in.server_address = impl->self_address;
+
     margo_trace(impl->mid,
         "[mraft] Sending message of type %d to server id %lu (%s)",
-        message->type, message->server_id, message->server_address);
+        in.type, in.server_id, in.server_address);
 
     req->cb = cb;
 
@@ -295,7 +256,7 @@ int mraft_io_impl_send(struct raft_io *io,
         return MRAFT_ERR_FROM_MERCURY;
     }
 
-    hret = margo_provider_forward(impl->provider_id, h, (void*)message);
+    hret = margo_provider_forward(impl->provider_id, h, (void*)&in);
     if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
@@ -475,18 +436,6 @@ static void mraft_craft_rpc_ult(hg_handle_t h)
         margo_error(mid, "[mraft] Could not deserialize output (mercury error %d)", hret);
         margo_destroy(h);
         return;
-    }
-
-    for(unsigned i=0; i < impl->servers.count; i++) {
-        if(margo_addr_cmp(mid, info->addr, impl->servers.hg_addr[i])) {
-            msg.server_address = impl->servers.str_addr[i];
-            msg.server_id      = impl->servers.ids[i];
-            break;
-        }
-    }
-    if(!msg.server_address) {
-        margo_warning(mid, "[mraft] Ignoring RPC received from an unknown server");
-        goto finish;
     }
 
     margo_trace(mid, "[mraft] Received message of type %d from server id %lu (%s)",

@@ -3,8 +3,8 @@ spack:
   - cmake
   - pkg-config
   - uuid
-  - c-raft
-  - mochi-margo ^mercury~boostsys
+  - c-raft~uv cflags=-g
+  - mochi-margo ^mercury~boostsys ^libfabric fabrics=tcp,rxm
   - mochi-abt-io
   - json-c
   - mochi-bedrock
