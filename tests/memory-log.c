@@ -20,7 +20,11 @@ struct memory_log {
     } entries;
 
     struct raft_snapshot last_snapshot;
+
+    FILE* trace_fd;
 };
+
+#define TRACE(log, ...) if(log->trace_fd) fprintf(log->trace_fd, __VA_ARGS__)
 
 static int memory_log_load(struct mraft_log*      log,
                            raft_term*             term,
@@ -31,8 +35,9 @@ static int memory_log_load(struct mraft_log*      log,
                            size_t*                n_entries)
 {
     struct memory_log* mlog = (struct memory_log*)log->data;
+    TRACE(mlog, "[mraft] [log] Entering %s\n", __func__);
     *term                   = mlog->term;
-    *start_index            = 0;
+    *start_index            = 1;
     *voted_for              = mlog->voted_for;
     *n_entries              = mlog->entries.count;
     *entries                = raft_malloc((*n_entries) * sizeof(**entries));
@@ -46,6 +51,11 @@ static int memory_log_load(struct mraft_log*      log,
         memcpy((*entries)[i].buf.base, mlog->entries.array[i].buf.base,
                (*entries)[i].buf.len);
     }
+    // Note: a snapshot is redundant in this memory log since we can
+    // load all the entries directly from memory. In a real log, the
+    // snapshot would contain whatever came before all the entries we
+    // are loading.
+#if 0
     struct raft_snapshot* snap
         = (struct raft_snapshot*)raft_calloc(1, sizeof(*snap));
     snap->index               = mlog->last_snapshot.index;
@@ -77,6 +87,8 @@ static int memory_log_load(struct mraft_log*      log,
                mlog->last_snapshot.configuration.servers[i].address);
     }
     *snapshot = snap;
+#endif
+    TRACE(mlog, "[mraft] [log] Leaving %s\n", __func__);
     return 0;
 }
 
@@ -84,12 +96,14 @@ static int memory_log_bootstrap(struct mraft_log*                log,
                                 const struct raft_configuration* conf)
 {
     struct memory_log* mlog = (struct memory_log*)log->data;
+    TRACE(mlog, "[mraft] [log] Entering %s\n", __func__);
     mlog->term              = 1;
     mlog->voted_for         = 0;
     mlog->entries.array     = calloc(1, sizeof(*mlog->entries.array));
     mlog->entries.capacity  = 1;
     mlog->entries.count     = 1;
     struct raft_entry* last = mlog->entries.array;
+    last->term              = 1;
     last->type              = RAFT_CHANGE;
     raft_configuration_encode(conf, &last->buf);
     mlog->last_snapshot.index               = 0;
@@ -105,6 +119,7 @@ static int memory_log_bootstrap(struct mraft_log*                log,
                                conf->servers[i].id, conf->servers[i].address,
                                conf->servers[i].role);
     }
+    TRACE(mlog, "[mraft] [log] Leaving %s\n", __func__);
     return 0;
 }
 
@@ -112,6 +127,7 @@ static int memory_log_recover(struct mraft_log*                log,
                               const struct raft_configuration* conf)
 {
     struct memory_log* mlog = (struct memory_log*)log->data;
+    TRACE(mlog, "[mraft] [log] Entering %s\n", __func__);
     if (mlog->entries.capacity == mlog->entries.count)
         mlog->entries.capacity = (1 + mlog->entries.capacity) * 2;
     mlog->entries.array
@@ -120,21 +136,26 @@ static int memory_log_recover(struct mraft_log*                log,
     struct raft_entry* last = &mlog->entries.array[mlog->entries.count];
     raft_configuration_encode(conf, &last->buf);
     mlog->entries.count += 1;
+    TRACE(mlog, "[mraft] [log] Leaving %s\n", __func__);
     return RAFT_NOTFOUND;
 }
 
 static int memory_log_set_term(struct mraft_log* log, raft_term term)
 {
     struct memory_log* mlog = (struct memory_log*)log->data;
+    TRACE(mlog, "[mraft] [log] Entering %s\n", __func__);
     mlog->term              = term;
     mlog->voted_for         = 0;
+    TRACE(mlog, "[mraft] [log] Leaving %s\n", __func__);
     return 0;
 }
 
 static int memory_log_set_vote(struct mraft_log* log, raft_id server_id)
 {
     struct memory_log* mlog = (struct memory_log*)log->data;
+    TRACE(mlog, "[mraft] [log] Entering %s\n", __func__);
     mlog->voted_for         = server_id;
+    TRACE(mlog, "[mraft] [log] Leaving %s\n", __func__);
     return 0;
 }
 
@@ -143,33 +164,37 @@ static int memory_log_append(struct mraft_log*       log,
                              unsigned                n)
 {
     struct memory_log* mlog     = (struct memory_log*)log->data;
+    TRACE(mlog, "[mraft] [log] Entering %s\n", __func__);
     unsigned           capacity = mlog->entries.capacity;
     while (capacity - mlog->entries.count < n) capacity = (1 + capacity) * 2;
     if (capacity > mlog->entries.capacity) {
         mlog->entries.array = (struct raft_entry*)realloc(
-            mlog->entries.array, capacity * sizeof(*mlog->entries.array));
+                mlog->entries.array, capacity * sizeof(*mlog->entries.array));
         mlog->entries.capacity = capacity;
     }
     for (unsigned i = 0; i < n; i++, mlog->entries.count++) {
-        struct raft_entry* last = &mlog->entries.array[mlog->entries.count - 1];
+        struct raft_entry* last = &mlog->entries.array[mlog->entries.count];
         last->term              = entries[i].term;
         last->type              = entries[i].type;
         last->buf.len           = entries[i].buf.len;
         last->buf.base          = malloc(entries[i].buf.len);
         memcpy(last->buf.base, entries[i].buf.base, entries[i].buf.len);
     }
+    TRACE(mlog, "[mraft] [log] Leaving %s\n", __func__);
     return 0;
 }
 
 static int memory_log_truncate(struct mraft_log* log, raft_index index)
 {
     struct memory_log* mlog = (struct memory_log*)log->data;
+    TRACE(mlog, "[mraft] [log] Entering %s\n", __func__);
     while (mlog->entries.count > index) {
         struct raft_entry* last = &mlog->entries.array[mlog->entries.count];
         free(last->buf.base);
         memset(last, 0, sizeof(*last));
         mlog->entries.count -= 1;
     }
+    TRACE(mlog, "[mraft] [log] Leaving %s\n", __func__);
     return 0;
 }
 
@@ -179,6 +204,7 @@ static int memory_log_snapshot_put(struct mraft_log*           log,
 {
     (void)trailing; /* ignore for now */
     struct memory_log* mlog                   = (struct memory_log*)log->data;
+    TRACE(mlog, "[mraft] [log] Entering %s\n", __func__);
     mlog->last_snapshot.index                 = snapshot->index;
     mlog->last_snapshot.term                  = snapshot->term;
     mlog->last_snapshot.configuration_index   = snapshot->configuration_index;
@@ -209,6 +235,7 @@ static int memory_log_snapshot_put(struct mraft_log*           log,
                snapshot->bufs[i].base, snapshot->bufs[i].len);
         offset += snapshot->bufs[i].len;
     }
+    TRACE(mlog, "[mraft] [log] Leaving %s\n", __func__);
     return 0;
 }
 
@@ -216,7 +243,8 @@ static int memory_log_snapshot_get(struct mraft_log*            log,
                                    struct raft_io_snapshot_get* req,
                                    raft_io_snapshot_get_cb      cb)
 {
-    struct memory_log*    mlog = (struct memory_log*)log->data;
+    struct memory_log* mlog = (struct memory_log*)log->data;
+    TRACE(mlog, "[mraft] [log] Entering %s\n", __func__);
     struct raft_snapshot* snap
         = (struct raft_snapshot*)raft_calloc(1, sizeof(*snap));
     snap->index               = mlog->last_snapshot.index;
@@ -250,12 +278,16 @@ static int memory_log_snapshot_get(struct mraft_log*            log,
                mlog->last_snapshot.configuration.servers[i].address);
     }
     cb(req, snap, 0);
+    TRACE(mlog, "[mraft] [log] Leaving %s\n", __func__);
     return 0;
 }
 
 struct mraft_log* memory_log_create()
 {
     struct mraft_log* log = (struct mraft_log*)calloc(1, sizeof(*log));
+    log->data = calloc(1, sizeof(struct memory_log));
+    struct memory_log* mlog = (struct memory_log*)log->data;
+    TRACE(mlog, "[mraft] [log] Entering %s\n", __func__);
 #define SET_FUNCTION(__name__) log->__name__ = memory_log_##__name__
     SET_FUNCTION(load);
     SET_FUNCTION(bootstrap);
@@ -267,13 +299,14 @@ struct mraft_log* memory_log_create()
     SET_FUNCTION(snapshot_put);
     SET_FUNCTION(snapshot_get);
 #undef SET_FUNCTION
-    log->data = calloc(1, sizeof(struct memory_log));
+    TRACE(mlog, "[mraft] [log] Leaving %s\n", __func__);
     return log;
 }
 
 void memory_log_free(struct mraft_log* log)
 {
     struct memory_log* mlog = (struct memory_log*)log->data;
+    TRACE(mlog, "[mraft] [log] Entering %s\n", __func__);
     for (unsigned i = 0; i < mlog->entries.count; i++) {
         free(mlog->entries.array[i].buf.base);
     }
@@ -285,6 +318,7 @@ void memory_log_free(struct mraft_log* log)
     raft_configuration_close(&mlog->last_snapshot.configuration);
     free(mlog);
     free(log);
+    TRACE(mlog, "[mraft] [log] Leaving %s\n", __func__);
 }
 
 void memory_log_get_entries(struct mraft_log*   log,
@@ -292,8 +326,16 @@ void memory_log_get_entries(struct mraft_log*   log,
                             unsigned*           n_entries)
 {
     struct memory_log* mlog = (struct memory_log*)log->data;
+    TRACE(mlog, "[mraft] [log] Entering %s\n", __func__);
     *entries                = mlog->entries.array;
     *n_entries              = mlog->entries.count;
+    TRACE(mlog, "[mraft] [log] Leaving %s\n", __func__);
+}
+
+void memory_log_set_logging(struct mraft_log* log, FILE* fp)
+{
+    struct memory_log* mlog = (struct memory_log*)log->data;
+    mlog->trace_fd = fp;
 }
 
 #ifdef __cplusplus
