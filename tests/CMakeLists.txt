@@ -14,5 +14,5 @@ target_link_libraries (error-recovery PUBLIC mochi-raft PkgConfig::SSG MPI::MPI_
 add_executable (mraft_get_raft_id mraft_get_raft_id.c)
 target_link_libraries (mraft_get_raft_id PUBLIC mochi-raft PkgConfig::SSG MPI::MPI_C memory-log)
 
-add_executable (ssg-error-recovery ssg-error-recovery.c)
-target_link_libraries (ssg-error-recovery PUBLIC mochi-raft PkgConfig::SSG MPI::MPI_C memory-log)
+add_executable (ssg-simple-test ssg-simple-test.c)
+target_link_libraries (ssg-simple-test PUBLIC mochi-raft PkgConfig::SSG MPI::MPI_C memory-log)

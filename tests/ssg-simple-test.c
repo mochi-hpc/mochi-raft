@@ -92,7 +92,7 @@ parse_args(int argc, char** argv, char** ssg_path, bool* join, raft_id* raft_id)
             *ssg_path = optarg;
             break;
         case 'j':
-            *join = 1;
+            *join = true;
             break;
         case 'r':
             *raft_id = atoll(optarg);
@@ -199,10 +199,15 @@ static void my_membership_update_cb(void*                    group_data,
         }
         break;
     case SSG_MEMBER_LEFT:
-        fprintf(stderr, "[test] [debug] member (member_id=%lu) left SSG group\n", member_id);
+        fprintf(stderr,
+                "[test] [debug] member (member_id=%lu) left SSG group\n",
+                member_id);
         break;
     case SSG_MEMBER_DIED:
-        fprintf(stderr, "[test] [debug] member (member_id=%lu) died and left SSG group\n", member_id);
+        fprintf(
+            stderr,
+            "[test] [debug] member (member_id=%lu) died and left SSG group\n",
+            member_id);
         break;
     default:
         /* Unknown update type, ignore it */
@@ -293,7 +298,7 @@ static int check_log_values(raft_id self_raft_id, struct mraft_log* log)
         char* buf = (char*)entries[i].buf.base;
         char  rank;
         int   n;
-        printf("id=%llu, buf='%s'\n", self_raft_id, buf);
+        printf("id=%llu, len=%lu, buf='%s'\n", self_raft_id, len, buf);
         // sscanf(buf, "%c%03d", &rank, &n);
         // expected[rank - 'A'][n] = 1;
     }
@@ -393,11 +398,15 @@ int main(int argc, char** argv)
         .self_raft_id = self_raft_id,
         .gid          = 0, /* Not set yet */
     };
-    if (join)
-        _join_ssg_group(mid, ssg_path, &arg);
-    else
+    if (!join) {
+        fprintf(stderr, "[test] [debug] creating SSG group\n");
         _create_ssg_group(mid, ssg_path, &arg);
-
+    }
+    else {
+        margo_thread_sleep(mid, 2000);
+        fprintf(stderr, "[test] [debug] joining SSG group\n");
+        _join_ssg_group(mid, ssg_path, &arg);
+    }
     margo_thread_sleep(mid, 2000);
 
     fprintf(stderr, "============= Starting to work ============\n");
@@ -423,7 +432,9 @@ int main(int argc, char** argv)
             margo_thread_sleep(mid, delay_ms);
         }
     }
-    margo_thread_sleep(mid, 10000);
+    if (self_raft_id != leader_id) {
+        margo_thread_sleep(mid, 10000);
+    }
 
     /* Print all log values */
     check_log_values(self_raft_id, log);
@@ -441,14 +452,25 @@ int main(int argc, char** argv)
     /* Finalize the state machine */
     free(myfsm.content);
 
-    /* Leave the SSG group */
-    ret = ssg_group_leave(arg.gid);
-    margo_assert(mid, ret == SSG_SUCCESS);
+    if (!join) {
+        int group_size;
+        do {
+            ssg_group_refresh(mid, arg.gid);
+            ssg_get_group_size(arg.gid, &group_size);
+            fprintf(stderr, "[test] [debug] sleeping until group_size = 0 (curr=%d)\n", group_size);
+            margo_thread_sleep(mid, 2000);
+        } while (group_size > 0);
 
+        /* Leave the SSG group */
+        ret = ssg_group_leave(arg.gid);
+        margo_assert(mid, ret == SSG_SUCCESS);
+
+        /* Destroy the SSG group */
+        ret = ssg_group_destroy(arg.gid);
+        margo_assert(mid, ret == SSG_SUCCESS);
+    }
+    
     /* Finalize SSG */
-    ret = ssg_group_destroy(arg.gid);
-    margo_assert(mid, ret == SSG_SUCCESS);
-
     ret = ssg_finalize();
     margo_assert(mid, ret == SSG_SUCCESS);
 
