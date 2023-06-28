@@ -5,7 +5,7 @@ spack:
   - uuid
   - c-raft~uv cflags=-g
   - mochi-margo ^mercury~boostsys ^libfabric fabrics=tcp,rxm
-  - mochi-abt-io
+  - mochi-abt-io@main
   - json-c
   - mochi-bedrock
   - mochi-ssg
