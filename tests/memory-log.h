@@ -33,6 +33,11 @@ void memory_log_free(struct mraft_log* log);
 void memory_log_get_entries(struct mraft_log*   log,
                             struct raft_entry** entries,
                             unsigned*           n_entries);
+/**
+ * @brief Provide a file pointer (e.g. stdout) for the memory
+ * log to trace its function calls.
+ */
+void memory_log_set_logging(struct mraft_log* log, FILE* fp);
 
 #ifdef __cplusplus
 }
