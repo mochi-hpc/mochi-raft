@@ -153,45 +153,56 @@ static void my_membership_update_cb(void*                    group_data,
 
     switch (update_type) {
     case SSG_MEMBER_JOINED:
-        fprintf(stderr, "[test] [debug] member joined SSG group\n");
+        fprintf(stderr, "[test] [debug] member_id=%lu joined SSG group\n",
+                member_id);
         /* The leader must add this new process to the raft cluster.
            He must get the joining process' raft ID */
         if (self_raft_id == leader_id) {
             /* Get the address of the joining server */
-            fprintf(stderr, "[test] [debug] trying to get the joiner's addr\n");
+            fprintf(stderr,
+                    "[test] [debug] trying to get the joiner's (member_id=%lu) "
+                    "addr\n",
+                    member_id);
             char* joiner_addr;
             ssg_get_group_member_addr_str(gid, member_id, &joiner_addr);
 
             /* Send RPC to ask for raft-id of joining server */
             fprintf(stderr,
-                    "[test] [debug] trying to get the joiner's raft id\n");
+                    "[test] [debug] trying to get the joiner's (member_id=%lu) "
+                    "raft_id\n",
+                    member_id);
             raft_id joiner_raft_id;
             ret = mraft_get_raft_id(raft, joiner_addr, &joiner_raft_id);
             margo_assert(mid, ret == 0);
 
             /* Add this process to the raft cluster */
             fprintf(stderr,
-                    "[test] [debug] trying to add the joiner (id=%llu, "
+                    "[test] [debug] trying to add the joiner (member_id=%lu, "
+                    "raft_id=%llu, "
                     "addr='%s') to the raft cluster\n",
-                    joiner_raft_id, joiner_addr);
+                    member_id, joiner_raft_id, joiner_addr);
             ret = mraft_add(raft, joiner_raft_id, joiner_addr);
             margo_assert(mid, ret == 0);
 
             /* Change the role from raft_spare */
-            fprintf(stderr, "[test] [debug] trying to change the role\n");
+            fprintf(stderr,
+                    "[test] [debug] trying to change role of (member_id=%lu, "
+                    "raft_id=%llu, addr='%s')\n",
+                    member_id, joiner_raft_id, joiner_addr);
             ret = mraft_assign(raft, joiner_raft_id, RAFT_VOTER);
             margo_assert(mid, ret == 0);
 
             fprintf(stderr,
-                    "[test] [debug] raft server(id=%llu, addr='%s') added\n",
-                    joiner_raft_id, joiner_addr);
+                    "[test] [debug] raft server(member_id=%lu, raft_id=%llu, "
+                    "addr='%s') added\n",
+                    member_id, joiner_raft_id, joiner_addr);
         }
         break;
     case SSG_MEMBER_LEFT:
-        fprintf(stderr, "[test] [debug] member left SSG group\n");
+        fprintf(stderr, "[test] [debug] member (member_id=%lu) left SSG group\n", member_id);
         break;
     case SSG_MEMBER_DIED:
-        fprintf(stderr, "[test] [debug] died and left SSG group\n");
+        fprintf(stderr, "[test] [debug] member (member_id=%lu) died and left SSG group\n", member_id);
         break;
     default:
         /* Unknown update type, ignore it */
@@ -397,22 +408,22 @@ int main(int argc, char** argv)
                 raft_state(&raft));
 
     /* Start sending to the state machine */
-    // srand(self_raft_id + 1);
-    // if (self_raft_id == leader_id) {  /* Only leader sends to FSM */
-    //     for (unsigned i = 0; i < 16; i++) {
-    //         char msg[20 + 3 + 1 + 1]; /* 20 for self_raft_id (ULL), 3 for i
-    //                                      (unsigned), 1 for '-' and 1 for '\0'
-    //                                      */
-    //         sprintf(msg, "%020llu-%03d", self_raft_id, i);
-    //         struct raft_buffer buf = {.base = msg, .len = 25};
-    //         fprintf(stderr, "[test] Sending %s\n", msg);
-    //         ret = mraft_apply(&raft, &buf, 1);
-    //         margo_assert(mid, ret == 0);
-    //         int delay_ms = random() % 500;
-    //         margo_thread_sleep(mid, delay_ms);
-    //     }
-    // }
-    margo_thread_sleep(mid, 5000);
+    srand(self_raft_id + 1);
+    if (self_raft_id == leader_id) {  /* Only leader sends to FSM */
+        for (unsigned i = 0; i < 16; i++) {
+            char msg[20 + 3 + 1 + 1]; /* 20 for self_raft_id (ULL), 3 for i
+                                         (unsigned), 1 for '-' and 1 for '\0'
+                                         */
+            sprintf(msg, "%020llu-%03d", self_raft_id, i);
+            struct raft_buffer buf = {.base = msg, .len = 25};
+            fprintf(stderr, "[test] Sending %s\n", msg);
+            ret = mraft_apply(&raft, &buf, 1);
+            margo_assert(mid, ret == 0);
+            int delay_ms = random() % 500;
+            margo_thread_sleep(mid, delay_ms);
+        }
+    }
+    margo_thread_sleep(mid, 10000);
 
     /* Print all log values */
     check_log_values(self_raft_id, log);
