@@ -52,16 +52,6 @@ set_target_properties (mochi-raft-bedrock-module
     SOVERSION ${MRAFT_VERSION_MAJOR})
 endif ()
 
-# mraft memory log library
-add_library(mochi-raft-memory-log ${src-files})
-target_link_libraries(mochi-raft-memory-log mochi-raft)
-set_target_properties (mochi-raft
-    PROPERTIES VERSION ${MRAFT_VERSION}
-    SOVERSION ${MRAFT_VERSION_MAJOR})
-if (${ENABLE_TESTS})
-    target_compile_definitions (mochi-raft-memory-log PRIVATE MRAFT_ENABLE_TESTS)
-endif ()
-
 # installation stuff (packaging and install commands)
 write_basic_package_version_file (
     "mochi-raft-config-version.cmake"
