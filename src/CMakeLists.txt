@@ -2,7 +2,8 @@
 set (src-files
      mraft.c
      mraft-io.c
-     pcg_basic.c)
+     pcg_basic.c
+     memory-log.c)
 
 set (bedrock-module-src-files
      bedrock-module.c)
