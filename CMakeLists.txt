@@ -8,6 +8,7 @@ option (ENABLE_TESTS    "Build tests" OFF)
 option (ENABLE_EXAMPLES "Build examples" OFF)
 option (ENABLE_SSG      "Build SSG support" OFF)
 option (ENABLE_BEDROCK  "Build bedrock module" OFF)
+option (ENABLE_PYTHON   "Build the Python module" OFF)
 
 # add our cmake module directory to the path
 set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
@@ -48,6 +49,12 @@ if (ENABLE_SSG)
     # search for ssg
     pkg_check_modules (SSG REQUIRED IMPORTED_TARGET ssg)
     set (PC_REQUIRES ssg)
+endif ()
+
+if (ENABLE_PYTHON)
+    find_package (Python3 COMPONENTS Interpreter Development REQUIRED)
+    find_package (pybind11 REQUIRED)
+    add_subdirectory (python)
 endif ()
 
 # library version set here (e.g. for shared libs).
