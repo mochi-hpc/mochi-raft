@@ -89,7 +89,7 @@ install (EXPORT mochi-raft-targets
 install (FILES "${CMAKE_CURRENT_BINARY_DIR}/mochi-raft-config.cmake"
                "${CMAKE_CURRENT_BINARY_DIR}/mochi-raft-config-version.cmake"
          DESTINATION ${mochi-raft-pkg} )
-install (FILES ../include/mochi-raft.h
+install (FILES ../include/mochi-raft.h ../include/mochi-raft-memory-log.h
          DESTINATION include)
 install (FILES "${CMAKE_CURRENT_BINARY_DIR}/mochi-raft.pc"
          DESTINATION "lib/pkgconfig/")
