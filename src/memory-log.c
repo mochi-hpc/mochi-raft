@@ -151,7 +151,7 @@ static int memory_log_append(struct mraft_log*       log,
     while (capacity - mlog->entries.count < n) capacity = (1 + capacity) * 2;
     if (capacity > mlog->entries.capacity) {
         mlog->entries.array = (struct raft_entry*)realloc(
-                mlog->entries.array, capacity * sizeof(*mlog->entries.array));
+            mlog->entries.array, capacity * sizeof(*mlog->entries.array));
         mlog->entries.capacity = capacity;
     }
     for (unsigned i = 0; i < n; i++, mlog->entries.count++) {
@@ -220,7 +220,7 @@ static int memory_log_snapshot_get(struct mraft_log*            log,
                                    struct raft_io_snapshot_get* req,
                                    raft_io_snapshot_get_cb      cb)
 {
-    struct memory_log* mlog = (struct memory_log*)log->data;
+    struct memory_log*    mlog = (struct memory_log*)log->data;
     struct raft_snapshot* snap
         = (struct raft_snapshot*)raft_calloc(1, sizeof(*snap));
     snap->index               = mlog->last_snapshot.index;
@@ -257,10 +257,9 @@ static int memory_log_snapshot_get(struct mraft_log*            log,
     return 0;
 }
 
-void mraft_memory_log_create(struct mraft_log* log)
+void mraft_memory_log_init(struct mraft_log* log)
 {
     log->data = calloc(1, sizeof(struct memory_log));
-    struct memory_log* mlog = (struct memory_log*)log->data;
 #define SET_FUNCTION(__name__) log->__name__ = memory_log_##__name__
     SET_FUNCTION(load);
     SET_FUNCTION(bootstrap);
@@ -288,4 +287,18 @@ void mraft_memory_log_finalize(struct mraft_log* log)
     raft_configuration_close(&mlog->last_snapshot.configuration);
     free(mlog);
     memset(log, 0, sizeof(*log));
+}
+
+int mraft_memory_log_get_entries(struct mraft_log*   log,
+                                 struct raft_entry** entries,
+                                 unsigned*           n_entries)
+{
+    struct memory_log* mlog = (struct memory_log*)log->data;
+    *entries                = mlog->entries.array;
+    *n_entries              = mlog->entries.count;
+#ifdef MRAFT_ENABLE_TESTS
+    return MRAFT_SUCCESS;
+#else
+    return RAFT_NOTFOUND;
+#endif
 }

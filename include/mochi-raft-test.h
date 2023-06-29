@@ -24,6 +24,20 @@ extern "C" {
  */
 int mraft_io_simulate_dead(struct raft_io* raft_io, bool dead);
 
+/**
+ * @brief This function is used for testing. Reads the log entries from `log`
+ * into the given parameters
+ *
+ * @param [in] mraft log that contains the entries we want to read from
+ * @param [out] entries Pointer to store the log entries from `log`
+ * @param [out] n_entries Pointer to store the number of in `log`
+ *
+ * @return 0 or error code.
+ */
+int mraft_memory_log_get_entries(struct mraft_log*   log,
+                                 struct raft_entry** entries,
+                                 unsigned*           n_entries);
+
 #ifdef __cplusplus
 }
 #endif

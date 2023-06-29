@@ -6,7 +6,7 @@
 #include <ssg.h>
 #include <ssg-mpi.h>
 #include <mochi-raft.h>
-#include "memory-log.h"
+#include <mochi-raft-memory-log.h>
 #include "mochi-raft-test.h"
 
 #define N_ENTRIES 16
@@ -72,58 +72,44 @@ static void tracer_emit(struct raft_tracer* t,
 
 static int check_log_values(struct mraft_log* log)
 {
-    struct raft_entry* entries = NULL;
-    unsigned           n_entries;
-    memory_log_get_entries(log, &entries, &n_entries);
+    struct raft_entry* entries   = NULL;
+    unsigned           n_entries = 0;
+    int ret = mraft_memory_log_get_entries(log, &entries, &n_entries);
+    if (ret != 0) return -1;
 
-    int N_PROCESSES = 1;
-    int expected[N_PROCESSES][N_ENTRIES];
+    int expected[N_ENTRIES];
 
     for (unsigned i = 0; i < n_entries; i++) {
         size_t len = entries[i].buf.len;
-        if (len != 5) continue;
+        if (len != 5) continue; /* To ignore the FSM "garbage" entries */
+
         char* buf = (char*)entries[i].buf.base;
         char  rank;
         int   n;
         sscanf(buf, "%c%03d", &rank, &n);
-        expected[rank - 'A'][n] = 1;
+        expected[n] = 1;
     }
-    for (unsigned i = 0; i < N_PROCESSES; i++)
-        for (unsigned j = 0; j < N_ENTRIES; j++)
-            if (expected[i][j] == 0) return -1;
+    for (unsigned i = 0; i < N_ENTRIES; i++)
+        if (expected[i] == 0) return -1;
 
-    fprintf(stderr, "[test] Log values recovered successfully\n");
     return 0;
 }
 
 struct error_recovery {
-    struct raft*      raft;
     struct raft_io*   raft_io;
     margo_instance_id mid;
-    raft_id           leader_id;
     ssg_member_id_t   self_id;
-    ssg_member_id_t   transfer_to_id;
 };
 
 /* A ULT that kills and revives a process */
 static void kill_and_revive_process_ult(void* arg)
 {
-    struct error_recovery* recovery       = (struct error_recovery*)arg;
-    struct raft*           raft           = recovery->raft;
-    struct raft_io*        raft_io        = recovery->raft_io;
-    margo_instance_id      mid            = recovery->mid;
-    uint64_t               leader_id      = recovery->leader_id;
-    uint64_t               self_id        = recovery->self_id;
-    ssg_member_id_t        transfer_to_id = recovery->transfer_to_id;
+    struct error_recovery* recovery = (struct error_recovery*)arg;
+    struct raft_io*        raft_io  = recovery->raft_io;
+    margo_instance_id      mid      = recovery->mid;
+    uint64_t               self_id  = recovery->self_id;
 
-    /* Transfer leadership before killing process */
-    if (self_id == leader_id) {
-        fprintf(stderr, "[test] Transfering leader ship from %lu to %lu\n",
-                leader_id, transfer_to_id);
-        mraft_transfer(raft, transfer_to_id);
-    }
-
-    margo_thread_sleep(mid, 3000); /* Sleep for some time */
+    margo_thread_sleep(mid, 3000);         /* Sleep for some time */
     mraft_io_simulate_dead(raft_io, true); /* Kill the process */
     fprintf(stderr, "[test] Process %lu has been disabled\n", self_id);
 
@@ -184,11 +170,12 @@ int main(int argc, char** argv)
                                 .snapshot_async    = NULL};
 
     /* Initialize the log */
-    struct mraft_log* log = memory_log_create();
+    struct mraft_log log;
+    mraft_memory_log_init(&log);
 
     /* Initialize raft_io backend */
     struct mraft_io_init_args mraft_io_init_args
-        = {.mid = mid, .pool = ABT_POOL_NULL, .id = 42, .log = log};
+        = {.mid = mid, .pool = ABT_POOL_NULL, .id = 42, .log = &log};
     struct raft_io raft_io;
     ret = mraft_io_init(&mraft_io_init_args, &raft_io);
     margo_assert(mid, ret == 0);
@@ -215,10 +202,24 @@ int main(int argc, char** argv)
     margo_thread_sleep(mid, 2000);
 
     fprintf(stderr, "============= Starting to work ============\n");
+
+    /* We want rank = 0 to be the leader */
     raft_id     leader_id;
     const char* leader_addr;
     raft_leader(&raft, &leader_id, &leader_addr);
-    margo_trace(mid, "[raft] Leader is %lu, state is %d\n", leader_id,
+    if (rank != 0 && self_id == leader_id) {
+        ssg_member_id_t transfer_to_id;
+        ssg_get_group_member_id_from_rank(gid, 0, &transfer_to_id);
+
+        printf("[test] [debug] Transfering leader ship from %lu to %lu\n",
+                self_id, transfer_to_id);
+        mraft_transfer(&raft, transfer_to_id);
+        printf("[test] [debug] Leadership transfered\n");
+    }
+    /* Wait to make sure leader ship has transfered*/
+    margo_thread_sleep(mid, 5000);
+    raft_leader(&raft, &leader_id, &leader_addr);
+    margo_trace(mid, "[raft] Leader is %llu, state is %d\n", leader_id,
                 raft_state(&raft));
 
     /* Start sending to the state machine */
@@ -246,16 +247,10 @@ int main(int argc, char** argv)
         ABT_xstream_get_main_pools(xstream, 1, &pool);
         ABT_thread thread;
 
-        /* Transfer leadership to process of rank 0 */
-        ssg_member_id_t transfer_to_id;
-        ssg_get_group_member_id_from_rank(gid, 0, &transfer_to_id);
         struct error_recovery recovery = {
-            .raft           = &raft,
-            .raft_io        = &raft_io,
-            .mid            = mid,
-            .leader_id      = leader_id,
-            .self_id        = self_id,
-            .transfer_to_id = transfer_to_id,
+            .raft_io = &raft_io,
+            .mid     = mid,
+            .self_id = self_id,
         };
 
         /* Post ULT to the execution stream */
@@ -277,7 +272,7 @@ int main(int argc, char** argv)
     /* Check that the process has the correct log despite being temporarily
      * disabled */
     if (rank == 1) {
-        ret = check_log_values(log);
+        ret = check_log_values(&log);
         margo_assert(mid, ret == 0);
     }
 
@@ -289,7 +284,7 @@ int main(int argc, char** argv)
     margo_assert(mid, ret == 0);
 
     /* Finalize the log */
-    memory_log_free(log);
+    mraft_memory_log_finalize(&log);
 
     /* Finalize the state machine */
     free(myfsm.content);
