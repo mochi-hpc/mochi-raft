@@ -7,7 +7,7 @@
 #include <ssg-mpi.h>
 #include <mochi-raft.h>
 #include <mochi-raft-memory-log.h>
-#include "mochi-raft-test.h"
+#include <mochi-raft-test.h>
 
 #define N_ENTRIES 16
 
