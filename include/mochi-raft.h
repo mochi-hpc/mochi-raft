@@ -6,12 +6,13 @@
 #ifndef MOCHI_RAFT_H
 #define MOCHI_RAFT_H
 
-#include <raft.h>
 #include <margo.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <raft.h>
 
 /*
  * Important: the mochi-raft API (mraft_* functions) complement

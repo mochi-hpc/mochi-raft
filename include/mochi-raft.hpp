@@ -347,6 +347,14 @@ class MemoryLog : public Log {
 
     public:
 
+    MemoryLog() {
+        mraft_memory_log_init(&m_log);
+    }
+
+    ~MemoryLog() {
+        mraft_memory_log_finalize(&m_log);
+    }
+
     void load(raft_term* term,
               raft_id* id,
               struct raft_snapshot** snap,
