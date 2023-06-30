@@ -165,7 +165,8 @@ class Raft {
         int ret;
         for(const auto& serverInfo : serverList) {
             ret = raft_configuration_add(
-                &config, serverInfo.id, serverInfo.address.c_str(), serverInfo.role);
+                &config, serverInfo.id, serverInfo.address.c_str(),
+                static_cast<int>(serverInfo.role));
             MRAFT_CHECK_RET_AND_RAISE(ret, raft_configuration_add);
         }
         ret = mraft_bootstrap(&m_raft, &config);
@@ -180,7 +181,8 @@ class Raft {
         int ret;
         for(const auto& serverInfo : serverList) {
             ret = raft_configuration_add(
-                &config, serverInfo.id, serverInfo.address.c_str(), serverInfo.role);
+                &config, serverInfo.id, serverInfo.address.c_str(),
+                static_cast<int>(serverInfo.role));
             MRAFT_CHECK_RET_AND_RAISE(ret, raft_configuration_add);
         }
         ret = mraft_recover(&m_raft, &config);
@@ -342,6 +344,8 @@ class MemoryLog : public Log {
     int ret = (m_log.func)(&m_log, __VA_ARGS__); \
     if(ret != 0) throw RaftException(ret, "MemoryLog::" #func " failed"); \
 } while(0)
+
+    public:
 
     void load(raft_term* term,
               raft_id* id,
