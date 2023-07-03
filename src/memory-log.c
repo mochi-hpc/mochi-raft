@@ -288,17 +288,3 @@ void mraft_memory_log_finalize(struct mraft_log* log)
     free(mlog);
     memset(log, 0, sizeof(*log));
 }
-
-int mraft_memory_log_get_entries(struct mraft_log*   log,
-                                 struct raft_entry** entries,
-                                 unsigned*           n_entries)
-{
-    struct memory_log* mlog = (struct memory_log*)log->data;
-    *entries                = mlog->entries.array;
-    *n_entries              = mlog->entries.count;
-#ifdef MRAFT_ENABLE_TESTS
-    return MRAFT_SUCCESS;
-#else
-    return RAFT_NOTFOUND;
-#endif
-}

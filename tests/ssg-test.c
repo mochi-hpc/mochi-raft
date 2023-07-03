@@ -413,19 +413,8 @@ static int _join_ssg_group(margo_instance_id             mid,
     return 0;
 }
 
-static int check_log_values(raft_id self_raft_id, struct myfsm* myfsm)
+static int check_log_values(struct myfsm* myfsm)
 {
-    struct mraft_hashmap_kv* curr;
-    struct mraft_hashmap_kv* tmp;
-
-    HASH_ITER(hh, myfsm->map, curr, tmp)
-    {
-        ssg_member_id_t member_ssg_id  = curr->member_id;
-        raft_id         member_raft_id = curr->raft_id;
-        printf("[test] [debug] map %lu -> %llu\n", member_ssg_id,
-               member_raft_id);
-    }
-
     // clang-format off
     fprintf(stderr, "[test] [debug] %s\n", myfsm->content);
     return strcmp((char*)myfsm->content, "00000000000000000001-00000000000000000000001-00100000000000000000001-00200000000000000000001-00300000000000000000001-00400000000000000000001-00500000000000000000001-00600000000000000000001-00700000000000000000001-00800000000000000000001-00900000000000000000001-01000000000000000000001-01100000000000000000001-01200000000000000000001-01300000000000000000001-01400000000000000000001-015");
@@ -532,11 +521,6 @@ int main(int argc, char** argv)
         fprintf(stderr, "[test] [debug] joining SSG group\n");
         _join_ssg_group(mid, ssg_path, &arg);
         margo_thread_sleep(mid, self_raft_id * 1001);
-        // if (self_raft_id == 2) {
-        //     fprintf(stderr, "[test] [debug] rank = 2 leaving ssg group\n");
-        //     margo_thread_sleep(mid, self_raft_id * 2000);
-        //     ssg_group_leave(arg.gid);
-        // }
     }
 
     fprintf(stderr, "============= Starting to work ============\n");
@@ -564,7 +548,7 @@ int main(int argc, char** argv)
     margo_thread_sleep(mid, 10000);
 
     /* Print all log values */
-    ret = check_log_values(self_raft_id, &myfsm);
+    ret = check_log_values(&myfsm);
     margo_assert(mid, ret == 0);
     fprintf(stderr, "[test] [debug] Correct log values\n");
 
