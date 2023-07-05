@@ -1,5 +1,6 @@
 enable_testing ()
 
+find_package (thallium REQUIRED)
 find_package (MPI REQUIRED)
 
 add_executable (simple-test simple-test.c)
