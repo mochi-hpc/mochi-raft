@@ -1,13 +1,16 @@
+#include <cstdlib>
 #include <fstream>
-#include <future>
+#include <getopt.h>
 #include <iostream>
 #include <map>
 #include <mochi-raft.hpp>
-#include <mutex>
 #include <sstream>
 #include <string>
 #include <thallium.hpp>
-#include <thread>
+#include <thallium/serialization/stl/array.hpp>
+#include <thallium/serialization/stl/string.hpp>
+#include <unistd.h>
+#include <sys/types.h>
 
 namespace tl = thallium;
 
@@ -38,60 +41,166 @@ class MyFSM : public mraft::StateMachine {
     }
 };
 
-void requestToJoin(const tl::request& req, const raft_id& raftId, const std::string& addr)
-{
-
-}
-
-class Master {
+class WorkerProvider : public tl::provider<WorkerProvider> {
   public:
-    void readInput(std::istream* input)
+    WorkerProvider(tl::engine& e, uint16_t provider_id)
+        : tl::provider<WorkerProvider>(e, provider_id),
+          raft(e.get_margo_instance(),
+               provider_id,
+               *std::make_unique<MyFSM>(),
+               *std::make_unique<mraft::MemoryLog>(),
+               provider_id)
     {
-        // Read from input stream until EOF
-        std::string line;
-        while (std::getline(*input, line)) {
-            if (line.find("add") == 0) {
-                // Spawn a process, and add it to the raft cluster
-                raft_id raftId = extractRaftId(line);
-                if (raftId == 0) {
-                    std::cerr << "[test] [debug] invalid raft-id: " << line
-                              << "\n";
-                    return;
-                }
-                addToRaftCluster(raftId);
-            } else if (line.find("remove") == 0) {
-            } else if (line.find("send") == 0) {
-            } else if (line.find("exit") == 0) {
-            } else {
-                std::cerr << "[test] [debug] invalid command: " << line << "\n";
-            }
-        }
-        std::string line;
-        while (std::getline(*input, line)) {
-            if (line.find("add raft-id=") == 0) {
-                int raftId = extractRaftId(line);
-                addToRaftCluster(raftId);
-            } else if (line.find("remove raft-id=") == 0) {
-                int raftId = extractRaftId(line);
-                removeFromRaftCluster(raftId);
-            } else if (line.find("send data=") == 0) {
-                std::string data = extractData(line);
-                sendData(data);
-            }
-        }
+#define DEFINE_WORKER_RPC(__rpc__) define(#__rpc__, &WorkerProvider::__rpc__)
+        DEFINE_WORKER_RPC(start);
+        DEFINE_WORKER_RPC(bootstrap);
+        DEFINE_WORKER_RPC(add);
+        DEFINE_WORKER_RPC(assign);
+        DEFINE_WORKER_RPC(remove);
+        // TODO: work the serialize DEFINE_WORKER_RPC(apply);
+        DEFINE_WORKER_RPC(transfer);
+#undef DEFINE_WORKER_RPC
+    }
+
+    ~WorkerProvider()
+    {
+        std::cout << "[test] [debug] [worker] calling wait_for_finalize() from "
+                     "~WorkerProvider\n";
+        get_engine().wait_for_finalize();
     }
 
   private:
-    static unsigned                totalWorkers = 0U;
+    mraft::Raft raft;
 
-    std::map<raft_id, std::string> raftAddrs;
-    std::vector<std::thread> raftWorkerThreads;
-    std::mutex                     mutex;
+    void start(void)
+    {
+        std::cout << "[test] [debug] [worker] received start RPC request\n";
+        raft.start();
+        std::cout << "[test] [debug] [worker] completed start RPC request\n";
+    }
 
+    // TODO: see about std::array<T, 1> ? std::vector<> ?
+    // template <typename ServerInfoContainer>
+    void bootstrap(const std::array<mraft::ServerInfo, 1>& serverList)
+    {
+        std::cout << "[test] [debug] [worker] received bootstrap RPC request\n";
+        raft.bootstrap(serverList);
+        std::cout
+            << "[test] [debug] [worker] completed bootstrap RPC request\n";
+    }
+
+    void add(const raft_id& raftId, const std::string& addr)
+    {
+        std::cout << "[test] [debug] [worker] received add(raftid=" << raftId
+                  << ", addr='" << addr << "') RPC request\n";
+        raft.add(raftId, addr.c_str());
+        std::cout << "[test] [debug] [worker] completed add(raftid=" << raftId
+                  << ", addr='" << addr << "') RPC request\n";
+    }
+
+    void assign(const raft_id& raftId, const mraft::Role& role)
+    {
+        std::cout << "[test] [debug] [worker] received assign(raftid=" << raftId
+                  << ", role=" << static_cast<int>(role) << ") RPC request\n";
+        raft.assign(raftId, role);
+        std::cout << "[test] [debug] [worker] completed assign(raftid="
+                  << raftId << ", role=" << static_cast<int>(role)
+                  << ") RPC request\n";
+    }
+
+    void remove(const raft_id& raftId)
+    {
+        std::cout << "[test] [debug] [worker] received remove(raftid=" << raftId
+                  << ") RPC request\n";
+        raft.remove(raftId);
+        std::cout << "[test] [debug] [worker] completed remove(raftid="
+                  << raftId << ") RPC request\n";
+    }
+
+    // void apply(std::shared_ptr<mraft::RaftBufferWrapper> bufs,
+    //            const unsigned&                           n)
+    // {
+    //     std::cout << "[test] [debug] [worker] received apply(n=" << n
+    //               << ") RPC request\n";
+    //     // TODO: review this wrapper and serialize problem
+    //     // raft.apply(bufs.get()->buffer, n);
+    //     std::cout << "[test] [debug] [worker] completed apply(n=" << n
+    //               << ") RPC request\n";
+    // }
+
+    void transfer(const raft_id& raftId)
+    {
+        std::cout << "[test] [debug] [worker] received transfer(raftId="
+                  << raftId << ") RPC request\n";
+        raft.transfer(raftId);
+        std::cout << "[test] [debug] [worker] completed transfer(raftId="
+                  << raftId << ") RPC request\n";
+    }
+};
+
+class Master {
+  public:
+    Master(tl::engine& e) : engine(e)
+    {
+#define DEFINE_MASTER_RPC(__rpc__) \
+    rpcs.insert(                   \
+        std::make_pair(#__rpc__, engine.define(#__rpc__).disable_response()))
+        DEFINE_MASTER_RPC(start);
+        DEFINE_MASTER_RPC(bootstrap);
+        DEFINE_MASTER_RPC(add);
+        DEFINE_MASTER_RPC(assign);
+        DEFINE_MASTER_RPC(remove);
+        DEFINE_MASTER_RPC(apply);
+        DEFINE_MASTER_RPC(transfer);
+#undef DEFINE_MASTER_RPC
+    }
+
+    void readInput(std::istream& input)
+    {
+        // Read from input stream until EOF
+        std::string line;
+        while (std::getline(input, line)) {
+            std::cout << "[test] [debug] [master] reading line: '" << line
+                      << "'\n";
+            if (line.find("add") == 0) {
+                std::cout
+                    << "[test] [debug] [master] found call to ADD process\n";
+                raft_id raftId = extractRaftId(line);
+                std::cout << "[test] [debug] [master] extracted raft-id="
+                          << raftId << "from line\n";
+                addToRaftCluster(raftId);
+            } else if (line.find("remove") == 0) {
+                raft_id raftId = extractRaftId(line);
+                removeFromRaftCluster(raftId);
+            } else if (line.find("send") == 0) {
+            } else if (line.find("exit") == 0) {
+            } else {
+                std::cerr << "[test] [debug] [master] invalid command: " << line
+                          << "\n";
+            }
+        }
+        std::cout << "[test] [debug] [master] finished reading input stream\n";
+    }
+
+  private:
+    std::map<std::string, tl::remote_procedure> rpcs;
+    tl::engine                                  engine;
+    std::map<raft_id, std::string>              raftAddrs;
+
+    /**
+     * @brief Extract the <raft-id> value from a line in the form
+     * "add raft-id=<raft-id>""
+     * @param [in] line the line to extract the raft-id from
+     * @return 0 on error, the value of the raft-id on success
+     */
     int extractRaftId(const std::string& line)
     {
         const auto& pos = line.find("=");
-        if (pos == std::string::npos) return 0;
+        if (pos == std::string::npos) {
+            std::cerr << "[test] [debug] [maste] extractRaftId invalid line: "
+                      << line << std::endl;
+            std::exit(1);
+        };
 
         // Trim any leading or trailing whitespace characters
         auto        raftIdStr          = line.substr(pos + 1);
@@ -112,40 +221,108 @@ class Master {
 
     std::string extractData(const std::string& line) { return line.substr(10); }
 
-    void addToRaftCluster(int raftId)
+    /**
+     * Spawn a worker process to add to the raft cluster
+     * @param [in] raftId Raft ID to give the spawned worker in the raft cluster
+     */
+    void addToRaftCluster(raft_id raftId)
     {
-        std::lock_guard<std::mutex> lock(mutex);
-        raftWorkerThreads.emplace_back([this, &raftId]() {
-            tl::engine       engine("tcp", THALLIUM_SERVER_MODE);
-            mraft::MemoryLog mlog;
-            MyFSM            myfsm;
-            mraft::Raft raft(engine.get_margo_instance(), raftId, myfsm, mlog);
+        std::cout << "[test] [debug] [master] trying to add raft-id=" << raftId
+                  << " to raft-cluster\n";
+        int  pipeFd[2]; /* Pipe for worker to communicate self_addr to master */
+        char worker_addr[256];
 
-            if (totalWorkers == 0) {
-                // First spawned, bootstrap raft cluster
+        if (pipe(pipeFd) == -1) {
+            std::cerr << "[test] [debug] [master] error creating pipe for "
+                         "worker of raft id="
+                      << raftId << std::endl;
+            std::exit(-1);
+        }
+
+        pid_t pid = fork();
+
+        if (pid < 0) {
+            std::cerr
+                << "[test] [debug] [master] error forking worker with raft id="
+                << raftId << std::endl;
+            std::exit(-1);
+        } else if (pid == 0) {
+            // Worker (child) process
+            // Close the read end of the pipe
+            close(pipeFd[0]);
+
+            // Here, the child has a copy of the parent engine, so we call
+            // finalize on it
+            engine.finalize();
+
+            // The child creates its own engine
+            engine = tl::engine("tcp", THALLIUM_SERVER_MODE);
+            std::cout << "[test] [debug] [worker] created tl::engine of mid="
+                      << engine.get_margo_instance() << "\n";
+
+            // Get the self_addr and resize it to size 256 with '\0'
+            std::string self_addr = engine.self();
+            self_addr.resize(256, '\0');
+
+            // Send self_addr to master
+            ssize_t _ = write(pipeFd[1], self_addr.c_str(), self_addr.size());
+            close(pipeFd[1]);
+            std::cout << "[test] [debug] [worker] raftId=" << raftId
+                      << ", addr='" << self_addr
+                      << "' wrote self_addr=" << self_addr << " to pipe\n";
+
+            // Create provider
+            std::cout << "[test] [debug] [worker] raftId=" << raftId
+                      << ", addr='" << self_addr << "' initializing provider\n";
+            WorkerProvider provider(engine, raftId);
+            provider.~WorkerProvider(); // FIXME: this shouldn't be necessary ?
+            std::cout << "============================================= [test] "
+                         "[debug] [worker] SHOULD "
+                         "REACH THIS\n";
+            std::exit(0);
+        } else if (pid > 0) {
+            // Master (parent) process
+            // Close the write end of the pipe
+            close(pipeFd[1]);
+
+            // Process the self_addr received from the worker
+            ssize_t _ = read(pipeFd[0], worker_addr, sizeof(worker_addr));
+            close(pipeFd[0]);
+            std::cout << "[test] [debug] [master] read worker_addr="
+                      << worker_addr << " from pipe\n";
+
+            // Add raft-id -> worker_addr to mapping
+            raftAddrs.insert({raftId, worker_addr});
+            std::cout << "[test] [debug] [master] lookup addr=" << worker_addr
+                      << " found: " << engine.lookup(worker_addr) << "\n";
+            tl::provider_handle handler(engine.lookup(worker_addr), raftId);
+            std::cout << "[test] [debug] [master] created provider handler\n";
+
+            // If its the first spawned worker, send it an RPC requesting to
+            // bootstrap the raft cluster
+            if (raftAddrs.size() == 1) {
+                std::cout << "[test] [debug] [master] sending bootstrap RPC "
+                             "request to"
+                             "raftId="
+                          << raftId << ", addr='" << worker_addr << "'\n";
                 mraft::ServerInfo server = {
-                    .address = static_cast<std::string>(engine.self()),
-                    .id = raftId,
-                    .role = mraft::Role::VOTER,
+                    .id      = raftId,
+                    .address = worker_addr,
+                    .role    = mraft::Role::VOTER,
                 };
                 std::array<mraft::ServerInfo, 1> servers = {server};
-                raft.bootstrap(servers);
+                rpcs["bootstrap"].on(handler)(servers);
+                std::cout
+                    << "[test] [debug] [master] bootstrap RPC requested\n";
             }
 
-            raft.start();
-
-            if (totalWorkers != 0) {
-                // Send RPC to leader requesting to be added to the raft cluster
-            }
-
-            mutex.lock();
-            raftAddrs[raftId] = static_cast<std::string>(engine.self());
-            totalWorkers++;
-            mutex.unlock();
-
-            /* Wait for master process to call engine.finalize() */
-            engine.wait_for_finalize();
-        }));
+            // Send RPC requesting the spawned worked to call mraft_start
+            std::cout << "[test] [debug] [master] sending start RPC request to "
+                         "raftId="
+                      << raftId << ", addr='" << worker_addr << "'\n";
+            rpcs["start"].on(handler)();
+            std::cout << "[test] [debug] [master] start RPC requested\n";
+        }
     }
 
     void removeFromRaftCluster(int raftId)
@@ -160,37 +337,71 @@ class Master {
         /* Send rpc to the leader asking him to send data to the FSM*/
     }
 };
+
+/**
+ * @brief Parse the command line arguments
+ *
+ * @param [in] argc argument count
+ * @param [in] argv command line arguments
+ * @param [out] filename pointer to store the filename given in the command line
+ * arguments
+ * @return 0 on success, -1 on failure
+ */
+int parseCommandLineArgs(int argc, char* argv[], char** filename)
+{
+    static const char* const shortOpts = "f:";
+    static const option      longOpts[]
+        = {{"file", required_argument, nullptr, 'f'}, {nullptr, 0, nullptr, 0}};
+
+    int option;
+    while ((option = getopt_long(argc, argv, shortOpts, longOpts, nullptr))
+           != -1) {
+        switch (option) {
+        case 'f':
+            *filename = optarg;
+            break;
+        case '?':
+        default:
+            // Handle unrecognized options or missing arguments
+            std::cerr << "[test] [debug] [master] unrecognized option or "
+                         "missing argument"
+                      << std::endl;
+            return -1;
+        }
+    }
+    return 0;
+}
 } // namespace
 
 int main(int argc, char* argv[])
 {
-    tl::engine myEngine("tcp", THALLIUM_SERVER_MODE);
+    tl::engine engine("tcp", THALLIUM_SERVER_MODE);
+    std::cout << "[test] [debug] [master] created tl::engine of mid="
+              << engine.get_margo_instance() << "\n";
 
     // Parse command-line arguments
+    char* filename = nullptr;
+    if (parseCommandLineArgs(argc, argv, &filename) < 0) {
+        std::cerr
+            << "[test] [debug] [master] error parsing command-line arguments"
+            << std::endl;
+        return 1;
+    };
     std::ifstream inputFile;
-    std::istream* input = nullptr;
-    for (int i = 1; i < argc; ++i) {
-        if (argv[i] == "--file" && i + 1 < argc) {
-            inputFile.open(argv[i + 1]);
-            ++i; // Skip the next argument
-            if (inputFile.is_open()) {
-                std::cerr << "[test] [debug] error opening " << argv[i + 1]
-                          << std::endl;
-                return 1;
-            }
-            input = &inputFile;
-        } else {
-            std::cerr << "[test] [debug] invalid option or flag: " << argv[i]
-                      << std::endl;
-            return 1;
-        }
-    }
-    // If no file was given on the command line, read commands from stdin
-    if (!input) input = &std::cin;
+    std::istream* input
+        = (!filename) ? &std::cin : (inputFile.open(filename), &inputFile);
 
-    Master master;
-    master.readInput(input);
-    myEngine.finalize();
+    std::cout << "[test] [debug] [master] parsed command-line arguments"
+              << "\n";
+
+    Master master(engine);
+
+    master.readInput(*input);
+
+    std::cout << "[test] [debug] [master] sleeping for 10 seconds"
+              << "\n";
+    margo_thread_sleep(engine.get_margo_instance(), 10 * 1000);
+    engine.finalize();
 
     return 0;
 }
