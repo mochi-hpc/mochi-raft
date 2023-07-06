@@ -84,6 +84,13 @@ struct ServerInfo {
     raft_id     id;
     std::string address;
     Role        role;
+
+    template <class Archive> void serialize(Archive& ar)
+    {
+        ar& id;
+        ar& address;
+        ar& role;
+    }
 };
 
 #define MRAFT_CHECK_RET_AND_RAISE(ret, func)                                   \
