@@ -20,12 +20,14 @@ class MyFSM : public mraft::StateMachine {
     friend class WorkerProvider;
 
   public:
+    const std::string& getContent() { return content; }
+
   private:
     std::string content;
 
     void apply(const struct raft_buffer* buf, void** result) override
     {
-        fprintf(stderr, "[test] applying '%s'\n",
+        fprintf(stderr, "[test] [debug] [MYFSM] applying '%s'\n",
                 static_cast<char*>(buf->base));
         content.append(static_cast<char*>(buf->base));
     }
@@ -66,13 +68,15 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
 
     ~WorkerProvider()
     {
-        std::cout << "[test] [debug] [worker] calling wait_for_finalize() from "
-                     "~WorkerProvider\n";
-        get_engine().wait_for_finalize();
+        // std::cout << "[test] [debug] [worker] calling wait_for_finalize()
+        // from "
+        //              "~WorkerProvider\n";
+        // get_engine().wait_for_finalize();
+        // std::cout
+        //     << "[test] [debug] [worker] unfroze from wait_for_finalize()\n";
         std::cout
-            << "[test] [debug] [worker] unfroze from wait_for_finalize()\n";
-        std::cout << "[test] [debug] [worker] myfsmcontents = '"
-                  << myfsm.content << "'\n";
+            << "[test] [debug] [worker] in ~WorkerProvider, myfsmcontents = '"
+            << myfsm.content << "'\n";
     }
 
   private:
@@ -133,7 +137,7 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
                   << "', size=" << buffer.size() << "\n";
         struct raft_buffer bufs = {
             .base = (void*)buffer.c_str(),
-            .len  = buffer.size(),
+            .len  = buffer.size() + 1, // Include '\0'
         };
         raft.apply(&bufs, 1U);
         std::cout << "[test] [debug] [worker] completed apply(buffer=" << buffer
@@ -198,32 +202,38 @@ class Master {
             if (command == "add") {
                 raft_id raftId;
                 iss >> raftId;
-                std::cout << "[test] [debug] [master] adding raftId=" << raftId << "\n";
+                std::cout << "[test] [debug] [master] adding raftId=" << raftId
+                          << "\n";
                 addWorker(raftId);
             } else if (command == "remove") {
                 raft_id raftId;
                 iss >> raftId;
-                std::cout << "[test] [debug] [master] removing raftId=" << raftId << "\n";
+                std::cout << "[test] [debug] [master] removing raftId="
+                          << raftId << "\n";
                 removeWorker(raftId);
             } else if (command == "shutdown") {
                 raft_id raftId;
                 iss >> raftId;
-                std::cout << "[test] [debug] [master] shutting down raftId=" << raftId << "\n";
+                std::cout << "[test] [debug] [master] shutting down raftId="
+                          << raftId << "\n";
                 shutdownWorker(raftId);
             } else if (command == "kill") {
                 pid_t pid;
                 iss >> pid;
-                std::cout << "[test] [debug] [master] killing child pid=" << pid << "\n";
+                std::cout << "[test] [debug] [master] killing child pid=" << pid
+                          << "\n";
                 killWorker(pid);
             } else if (command == "apply") {
                 std::string data;
                 iss >> data;
-                std::cout << "[test] [debug] [master] sending data '" << data << "' to FSM\n";
+                std::cout << "[test] [debug] [master] sending data '" << data
+                          << "' to FSM\n";
                 sendDataToRaftCluster(data);
             } else if (command == "sleep") {
                 double timeout_ms;
                 iss >> timeout_ms;
-                std::cout << "[test] [debug] [master] sleeping for " << timeout_ms << " ms\n";
+                std::cout << "[test] [debug] [master] sleeping for "
+                          << timeout_ms << " ms\n";
                 margo_thread_sleep(engine.get_margo_instance(), timeout_ms);
             } else {
                 std::cerr
@@ -295,10 +305,19 @@ class Master {
             // Create provider
             std::cout << "[test] [debug] [worker] raftId=" << raftId
                       << ", addr='" << self_addr << "' initializing provider\n";
-            WorkerProvider provider(engine, raftId);
-            provider.~WorkerProvider(); // FIXME: this shouldn't be necessary ?
-            std::cout << "============================================= [test] "
-                         "[debug] [worker] SHOULD NOT REACH THIS\n";
+            WorkerProvider* provider = new WorkerProvider(engine, raftId);
+            std::cout << "[test] [debug] [worker] heap allocated provider\n";
+            engine.push_finalize_callback(
+                [provider]() mutable { delete provider; });
+            std::cout << "[test] [debug] [worker] added finalize callback\n";
+            engine.wait_for_finalize();
+            std::cout << "[test] [debug] [worker] code after wait for "
+                         "finalize... exiting\n";
+            // WorkerProvider provider(engine, raftId);
+            // provider.~WorkerProvider(); // FIXME: this shouldn't be necessary
+            // ? std::cout << "=============================================
+            // [test] "
+            //              "[debug] [worker] SHOULD NOT REACH THIS\n";
             std::exit(0);
         } else if (pid > 0) {
             // Master (parent) process
@@ -500,8 +519,7 @@ int parseCommandLineArgs(int argc, char* argv[], char** filename)
         default:
             // Handle unrecognized options or missing arguments
             std::cerr << "[test] [debug] [master] unrecognized option or "
-                         "missing argument"
-                      << std::endl;
+                         "missing argument\n";
             return -1;
         }
     }
@@ -537,7 +555,10 @@ int main(int argc, char* argv[])
     std::cout << "[test] [debug] [master] sleeping for 10 seconds"
               << "\n";
     margo_thread_sleep(engine.get_margo_instance(), 10 * 1000);
+
     engine.finalize();
+
+    std::cout << "[test] [debug] [master] engine finalized\n";
 
     return 0;
 }
