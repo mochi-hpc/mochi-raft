@@ -169,7 +169,6 @@ class Raft {
     template <typename ServerInfoContainer>
     void bootstrap(const ServerInfoContainer& serverList)
     {
-        std::cout << "[mraft] [debug] inside bootstrap" << std::endl;
         raft_configuration config;
         raft_configuration_init(&config);
         int ret;
@@ -179,13 +178,9 @@ class Raft {
                                          static_cast<int>(serverInfo.role));
             MRAFT_CHECK_RET_AND_RAISE(ret, raft_configuration_add);
         }
-        std::cout << "[mraft] [debug] raft configuration servers added"
-                  << std::endl;
         ret = mraft_bootstrap(&m_raft, &config);
         MRAFT_CHECK_RET_AND_RAISE(ret, mraft_bootstrap);
-        std::cout << "[mraft] [debug] mraft_bootstrap called" << std::endl;
         raft_configuration_close(&config);
-        std::cout << "[mraft] [debug] configuration closed" << std::endl;
     }
 
     template <typename ServerInfoContainer>
@@ -253,6 +248,21 @@ class Raft {
         int ret = mraft_get_raft_id(const_cast<raft*>(&m_raft), address, &id);
         MRAFT_CHECK_RET_AND_RAISE(ret, mraft_get_raft_id);
         return id;
+    }
+
+    ServerInfo get_leader() const
+    {
+        std::cout << "[mraft] [test] [debug] searching for leader\n";
+        raft_id     leader_id;
+        const char* leader_addr;
+        std::cout << "[mraft] [test] [debug] about to call raft_leader\n";
+        raft_leader(const_cast<raft*>(&m_raft), &leader_id, &leader_addr);
+        std::cout << "[mraft] [test] [debug] found leaderId=" << leader_id
+                  << ", leader_addr='" << leader_addr << "'\n";
+        std::string leader_addr_str((!leader_addr) ? "" : leader_addr);
+        leader_addr_str.resize(256, '\0');
+        ServerInfo leader = {.id = leader_id, .address = leader_addr};
+        return leader;
     }
 
   private:
