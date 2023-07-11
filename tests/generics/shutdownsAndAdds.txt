@@ -3,14 +3,14 @@ sleep 1000
 add 2
 sleep 1000
 shutdown 2
-sleep 10000
+sleep 1000
 add 3
 sleep 1000
 add 4
 sleep 1000
 shutdown 3
-sleep 10000
+sleep 1000
 shutdown 4
-sleep 10000
+sleep 1000
 add 5
 sleep 1000

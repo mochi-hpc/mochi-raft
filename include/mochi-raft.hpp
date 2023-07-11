@@ -252,13 +252,9 @@ class Raft {
 
     ServerInfo get_leader() const
     {
-        std::cout << "[mraft] [test] [debug] searching for leader\n";
         raft_id     leader_id;
         const char* leader_addr;
-        std::cout << "[mraft] [test] [debug] about to call raft_leader\n";
         raft_leader(const_cast<raft*>(&m_raft), &leader_id, &leader_addr);
-        std::cout << "[mraft] [test] [debug] found leaderId=" << leader_id
-                  << ", leader_addr='" << leader_addr << "'\n";
         std::string leader_addr_str((!leader_addr) ? "" : leader_addr);
         leader_addr_str.resize(256, '\0');
         ServerInfo leader = {.id = leader_id, .address = leader_addr};

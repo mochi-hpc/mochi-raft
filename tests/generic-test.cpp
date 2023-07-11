@@ -15,20 +15,37 @@
 
 namespace tl = thallium;
 
+#define margo_assert(__mid__, __expr__)                                      \
+    do {                                                                     \
+        if (!(__expr__)) {                                                   \
+            margo_critical(__mid__,                                          \
+                           "[test] assert failed at %s line %d: " #__expr__, \
+                           __FILE__, __LINE__);                              \
+            exit(-1);                                                        \
+        }                                                                    \
+    } while (0)
+
+#define worker_trace(__message__)                                \
+    do {                                                         \
+        std::cerr << "[trace] [worker] " << __message__ << "\n"; \
+    } while (0)
+
+#define master_trace(__message__)                                \
+    do {                                                         \
+        std::cerr << "[trace] [master] " << __message__ << "\n"; \
+    } while (0)
+
 namespace {
 class MyFSM : public mraft::StateMachine {
     friend class WorkerProvider;
-
-  public:
-    const std::string& getContent() { return content; }
 
   private:
     std::string content;
 
     void apply(const struct raft_buffer* buf, void** result) override
     {
-        fprintf(stderr, "[test] [debug] [MYFSM] applying '%s'\n",
-                static_cast<char*>(buf->base));
+        std::cerr << "[test] [debug] applying '"
+                  << static_cast<char*>(buf->base) << "'\n";
         content.append(static_cast<char*>(buf->base));
     }
 
@@ -43,7 +60,7 @@ class MyFSM : public mraft::StateMachine {
     void restore(struct raft_buffer* buf) override
     {
         content.clear();
-        content = std::string(static_cast<char*>(buf->base));
+        content.append(std::string(static_cast<char*>(buf->base)));
     }
 };
 
@@ -60,23 +77,11 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
         DEFINE_WORKER_RPC(assign);
         DEFINE_WORKER_RPC(remove);
         DEFINE_WORKER_RPC(apply);
-        DEFINE_WORKER_RPC(transfer);
-        DEFINE_WORKER_RPC(leader);
+        DEFINE_WORKER_RPC(get_leader);
         DEFINE_WORKER_RPC(shutdown);
+        DEFINE_WORKER_RPC(suspend);
+        DEFINE_WORKER_RPC(get_fsm_content);
 #undef DEFINE_WORKER_RPC
-    }
-
-    ~WorkerProvider()
-    {
-        // std::cout << "[test] [debug] [worker] calling wait_for_finalize()
-        // from "
-        //              "~WorkerProvider\n";
-        // get_engine().wait_for_finalize();
-        // std::cout
-        //     << "[test] [debug] [worker] unfroze from wait_for_finalize()\n";
-        std::cout
-            << "[test] [debug] [worker] in ~WorkerProvider, myfsmcontents = '"
-            << myfsm.content << "'\n";
     }
 
   private:
@@ -86,88 +91,86 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
 
     void start(void)
     {
-        std::cout << "[test] [debug] [worker] received start RPC request\n";
+        worker_trace("received start RPC request from master");
         raft.start();
-        std::cout << "[test] [debug] [worker] completed start RPC request\n";
+        worker_trace("completed start RPC request");
     }
 
-    // TODO: see about std::array<T, 1> ? std::vector<> ?
-    // template <typename ServerInfoContainer>
     void bootstrap(const std::array<mraft::ServerInfo, 1>& serverList)
     {
-        std::cout << "[test] [debug] [worker] received bootstrap RPC request\n";
+        worker_trace("received bootstrap RPC request from master");
         raft.bootstrap(serverList);
-        std::cout
-            << "[test] [debug] [worker] completed bootstrap RPC request\n";
+        worker_trace("completed bootstrap RPC request");
     }
 
     void add(const raft_id& raftId, const std::string& addr)
     {
-        std::cout << "[test] [debug] [worker] received add(raftid=" << raftId
-                  << ", addr='" << addr << "') RPC request\n";
+        worker_trace("received add(raft_id=" << raftId << ", addr=" << addr
+                                             << ") RPC request from master");
         raft.add(raftId, addr.c_str());
-        std::cout << "[test] [debug] [worker] completed add(raftid=" << raftId
-                  << ", addr='" << addr << "') RPC request\n";
+        worker_trace("completed add RPC request");
     }
 
     void assign(const raft_id& raftId, const mraft::Role& role)
     {
-        std::cout << "[test] [debug] [worker] received assign(raftid=" << raftId
-                  << ", role=" << static_cast<int>(role) << ") RPC request\n";
+        worker_trace("received assign(raft_id=" << raftId << ", role="
+                                                << static_cast<int>(role)
+                                                << ") RPC request from master");
         raft.assign(raftId, role);
-        std::cout << "[test] [debug] [worker] completed assign(raftid="
-                  << raftId << ", role=" << static_cast<int>(role)
-                  << ") RPC request\n";
+        worker_trace("completed assign RPC request");
     }
 
     void remove(const raft_id& raftId)
     {
-        std::cout << "[test] [debug] [worker] received remove(raftid=" << raftId
-                  << ") RPC request\n";
+        worker_trace("received remove(raft_id=" << raftId
+                                                << ") RPC request from master");
         raft.remove(raftId);
-        std::cout << "[test] [debug] [worker] completed remove(raftid="
-                  << raftId << ") RPC request\n";
+        worker_trace("completed remove RPC request");
     }
 
     void apply(const std::string& buffer)
     {
-        std::cout << "[test] [debug] [worker] received apply(buffer=" << buffer
-                  << ") RPC request\n";
-        std::cout << "[test] [debug] [worker] c_str='" << buffer.c_str()
-                  << "', size=" << buffer.size() << "\n";
+        worker_trace("received apply(buffer=" << buffer
+                                              << ") RPC request from master");
         struct raft_buffer bufs = {
             .base = (void*)buffer.c_str(),
             .len  = buffer.size() + 1, // Include '\0'
         };
         raft.apply(&bufs, 1U);
-        std::cout << "[test] [debug] [worker] completed apply(buffer=" << buffer
-                  << ") RPC request\n";
+        worker_trace("completed apply RPC request");
     }
 
-    void transfer(const raft_id& raftId)
+    mraft::ServerInfo get_leader(void) const
     {
-        std::cout << "[test] [debug] [worker] received transfer(raftId="
-                  << raftId << ") RPC request\n";
-        raft.transfer(raftId);
-        std::cout << "[test] [debug] [worker] completed transfer(raftId="
-                  << raftId << ") RPC request\n";
-    }
-
-    mraft::ServerInfo leader(void)
-    {
-        std::cout << "[test] [debug] [worker] received leader RPC request\n";
+        worker_trace("received get_leader RPC request from master");
         mraft::ServerInfo leader = raft.get_leader();
-        std::cout << "[test] [debug] [worker] completed leader RPC request\n";
+        worker_trace("completed get_leader RPC request");
         return leader;
     }
 
-    void shutdown(void)
+    void shutdown(void) const
     {
-        std::cout << "[test] [debug] [worker] received shutdown RPC request\n";
+        worker_trace("received shutdown RPC request from master");
         get_engine().finalize();
-        std::cout << "[test] [debug] [worker] completed shutdown RPC request\n";
+        worker_trace("completed shutdown RPC request");
     }
-};
+
+    void suspend(double timeout_ms) const
+    {
+        worker_trace("received suspend(timeout_ms="
+                     << timeout_ms << ") RPC request from master");
+        get_engine().get_progress_pool().make_thread(
+            [timeout_ms]() { sleep(timeout_ms); }, tl::anonymous{});
+        worker_trace("completed suspend RPC request");
+    }
+
+    std::string get_fsm_content(void) const
+    {
+        worker_trace("received get_fsm_content RPC request from master");
+        worker_trace("completed suspend RPC request");
+        return myfsm.content;
+    }
+}; // namespace
 
 class Master {
   public:
@@ -184,9 +187,19 @@ class Master {
         DEFINE_MASTER_RPC(apply);
         DEFINE_MASTER_RPC(transfer);
         DEFINE_MASTER_RPC(shutdown);
+        DEFINE_MASTER_RPC(suspend);
 #undef DEFINE_MASTER_RPC
-        // This RPC response with data
-        rpcs.insert(std::make_pair("leader", engine.define("leader")));
+        // This RPC respond with data, so we don't call disable_response
+        rpcs.insert(std::make_pair("get_leader", engine.define("get_leader")));
+        rpcs.insert(std::make_pair("get_fsm_content",
+                                   engine.define("get_fsm_content")));
+    }
+
+    ~Master()
+    {
+        // Request to all workers to shutdown
+        while (!raftAddrs.empty()) shutdownWorker(raftAddrs.cbegin()->first);
+        engine.finalize();
     }
 
     void readInput(std::istream& input)
@@ -194,60 +207,55 @@ class Master {
         // Read from input stream until EOF
         std::string line;
         while (std::getline(input, line)) {
-            std::cout << "[test] [debug] [master] reading line: '" << line
-                      << "'\n";
+            std::cout << "=================================================\n";
+            master_trace("reading line=" << line);
             std::istringstream iss(line);
             std::string        command;
             iss >> command;
             if (command == "add") {
                 raft_id raftId;
                 iss >> raftId;
-                std::cout << "[test] [debug] [master] adding raftId=" << raftId
-                          << "\n";
                 addWorker(raftId);
             } else if (command == "remove") {
                 raft_id raftId;
                 iss >> raftId;
-                std::cout << "[test] [debug] [master] removing raftId="
-                          << raftId << "\n";
                 removeWorker(raftId);
             } else if (command == "shutdown") {
                 raft_id raftId;
                 iss >> raftId;
-                std::cout << "[test] [debug] [master] shutting down raftId="
-                          << raftId << "\n";
                 shutdownWorker(raftId);
             } else if (command == "kill") {
                 pid_t pid;
                 iss >> pid;
-                std::cout << "[test] [debug] [master] killing child pid=" << pid
-                          << "\n";
                 killWorker(pid);
             } else if (command == "apply") {
                 std::string data;
-                iss >> data;
-                std::cout << "[test] [debug] [master] sending data '" << data
-                          << "' to FSM\n";
+                std::getline(iss >> std::ws, data);
+                expected_fsm_content.append(data);
                 sendDataToRaftCluster(data);
             } else if (command == "sleep") {
                 double timeout_ms;
                 iss >> timeout_ms;
-                std::cout << "[test] [debug] [master] sleeping for "
-                          << timeout_ms << " ms\n";
+                master_trace("sleeping for " << timeout_ms << " ms");
                 margo_thread_sleep(engine.get_margo_instance(), timeout_ms);
+            } else if (command == "suspend") {
+                raft_id raftId;
+                double  timeout_ms;
+                iss >> raftId >> timeout_ms;
+                suspendWorker(raftId, timeout_ms);
             } else {
-                std::cerr
-                    << "[test] [debug] [master] invalid command in line: '"
-                    << line << "'\n";
+                master_trace("unrecognized command: " << command);
             }
         }
-        std::cout << "[test] [debug] [master] finished reading input stream\n";
+        master_trace("done reading input stream");
     }
 
   private:
     std::map<std::string, tl::remote_procedure> rpcs;
     tl::engine                                  engine;
     std::map<raft_id, std::string>              raftAddrs;
+    std::map<pid_t, raft_id>                    pidToRaftId;
+    std::string                                 expected_fsm_content;
 
     /**
      * Spawn a worker process to add to the raft cluster
@@ -255,29 +263,24 @@ class Master {
      */
     void addWorker(raft_id raftId)
     {
-        std::cout << "[test] [debug] [master] trying to add raft-id=" << raftId
-                  << " to raft-cluster\n";
+        master_trace(
+            "preparing to request to add worker with raft_id=" << raftId);
         int  pipeFd[2]; // Pipe for worker to communicate self_addr to master
         char worker_addr[256];
 
         if (pipe(pipeFd) == -1) {
-            std::cerr << "[test] [debug] [master] error creating pipe for "
-                         "worker of raft id="
-                      << raftId << std::endl;
-            std::exit(-1);
+            master_trace("failed creating communication pipe... exiting");
+            std::exit(1);
         }
 
         pid_t pid = fork();
 
         if (pid < 0) {
-            std::cerr
-                << "[test] [debug] [master] error forking worker with raft id="
-                << raftId << std::endl;
-            std::exit(-1);
+            master_trace("failed fork call... exiting");
+            std::exit(1);
         } else if (pid == 0) {
             // Worker (child) process
-            std::cout << "[test] [debug] [worker] spawned with pid=" << getpid()
-                      << "\n";
+            worker_trace("spawned with pid=" << getpid());
 
             // Close the read end of the pipe
             close(pipeFd[0]);
@@ -288,8 +291,6 @@ class Master {
 
             // The child creates its own engine
             engine = tl::engine("tcp", THALLIUM_SERVER_MODE);
-            std::cout << "[test] [debug] [worker] created tl::engine of mid="
-                      << engine.get_margo_instance() << "\n";
 
             // Get the self_addr and resize it to size 256 with '\0'
             std::string self_addr = engine.self();
@@ -298,26 +299,18 @@ class Master {
             // Send self_addr to master
             ssize_t _ = write(pipeFd[1], self_addr.c_str(), self_addr.size());
             close(pipeFd[1]);
-            std::cout << "[test] [debug] [worker] raftId=" << raftId
-                      << ", addr='" << self_addr
-                      << "' wrote self_addr=" << self_addr << " to pipe\n";
+            worker_trace("wrote addr=" << self_addr
+                                       << " to communication pipe");
 
             // Create provider
-            std::cout << "[test] [debug] [worker] raftId=" << raftId
-                      << ", addr='" << self_addr << "' initializing provider\n";
             WorkerProvider* provider = new WorkerProvider(engine, raftId);
-            std::cout << "[test] [debug] [worker] heap allocated provider\n";
-            engine.push_finalize_callback(
-                [provider]() mutable { delete provider; });
-            std::cout << "[test] [debug] [worker] added finalize callback\n";
+            auto            finalize_callback = [provider]() mutable {
+                delete provider;
+                provider = nullptr;
+            };
+            engine.push_finalize_callback(finalize_callback);
+            worker_trace("provider created... waiting for finalize call");
             engine.wait_for_finalize();
-            std::cout << "[test] [debug] [worker] code after wait for "
-                         "finalize... exiting\n";
-            // WorkerProvider provider(engine, raftId);
-            // provider.~WorkerProvider(); // FIXME: this shouldn't be necessary
-            // ? std::cout << "=============================================
-            // [test] "
-            //              "[debug] [worker] SHOULD NOT REACH THIS\n";
             std::exit(0);
         } else if (pid > 0) {
             // Master (parent) process
@@ -327,166 +320,204 @@ class Master {
             // Process the self_addr received from the worker
             ssize_t _ = read(pipeFd[0], worker_addr, sizeof(worker_addr));
             close(pipeFd[0]);
-            std::cout << "[test] [debug] [master] read worker_addr="
-                      << worker_addr << " from pipe\n";
-
             std::string worker_addr_str(worker_addr);
             worker_addr_str.resize(256, '\0');
-            margo_thread_sleep(engine.get_margo_instance(), 4 * 1000);
+            master_trace("found worker addr=" << worker_addr_str);
+            margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
 
             // Add raft-id -> worker_addr to mapping
             raftAddrs.insert({raftId, worker_addr_str});
-            std::cout << "[test] [debug] [master] lookup addr="
-                      << worker_addr_str
-                      << " found: " << engine.lookup(worker_addr_str) << "\n";
+            pidToRaftId.insert({pid, raftId});
+
+            // Get handle for the spawned worker to make RPC requests to worker
             tl::provider_handle handle(engine.lookup(worker_addr_str), raftId);
-            std::cout << "[test] [debug] [master] created provider handle\n";
 
             // If its the first spawned worker, send it an RPC requesting to
             // bootstrap the raft cluster
             if (raftAddrs.size() == 1) {
-                std::cout << "[test] [debug] [master] sending bootstrap RPC "
-                             "request to"
-                             "raftId="
-                          << raftId << ", addr='" << worker_addr_str << "'\n";
-                mraft::ServerInfo server = {
+                master_trace("requesting bootstrap RPC to worker with raft_id="
+                             << raftId << ", addr=" << worker_addr_str);
+                std::array<mraft::ServerInfo, 1> servers = {mraft::ServerInfo{
                     .id      = raftId,
                     .address = worker_addr_str,
                     .role    = mraft::Role::VOTER,
-                };
-                std::array<mraft::ServerInfo, 1> servers = {server};
+                }};
                 rpcs["bootstrap"].on(handle)(servers);
-                std::cout
-                    << "[test] [debug] [master] bootstrap RPC requested\n";
                 margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
             }
 
             // Send RPC requesting the spawned worked to call mraft_start
-            std::cout << "[test] [debug] [master] sending start RPC request to "
-                         "raftId="
-                      << raftId << ", addr='" << worker_addr_str << "'\n";
+            master_trace("requesting start RPC to worker with raft_id="
+                         << raftId << ", addr=" << worker_addr_str);
             rpcs["start"].on(handle)();
-            std::cout << "[test] [debug] [master] start RPC requested\n";
             margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
 
             // If we didn't bootstrap, send an RPC to the leader of the cluster
             // asking to add the spawned worker and assign it to raft voter
-            // TODO: think about edge case if the only process in the cluster
-            // has bootstrap, but leaves
-            if (raftAddrs.size() > 1) {
-                // Send RPCs to any spawned worker and ask for the leader ID.
-                // Stop after the first response, because we might ask the
-                // worker we just spawned, in which case he doesn't have a
-                // leader, so we need to make it ask somebody else.
-                mraft::ServerInfo   leader;
-                tl::provider_handle handle;
-                int                 ret = getLeaderInfo(leader, handle);
-                if (ret == -1) {
-                    std::cerr << "[test] [debug] [master] failed getting "
-                                 "leader from cluster\n";
-                    exit(1);
-                }
-                std::cout << "[test] [debug] [master] RPC leader found raftId="
-                          << leader.id << ", addr='" << leader.address
-                          << "'. Provider found is " << handle << "\n";
-                margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
-                std::cout << "[test] [debug] [master] sending add(raftId="
-                          << raftId << ", addr='" << worker_addr_str
-                          << "') RPC request to "
-                             "raftId="
-                          << leader.id << ", addr='" << leader.address << "'\n";
-                rpcs["add"].on(handle)(raftId, worker_addr_str);
-                std::cout << "[test] [debug] [master] add RPC requested\n";
-                margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
+            if (raftAddrs.size() == 1) return;
 
-                std::cout
-                    << "[test] [debug] [master] sending assign RPC request to "
-                       "raftId="
-                    << leader.id << ", addr='" << leader.address << "'\n";
-                rpcs["assign"].on(handle)(raftId, mraft::Role::VOTER);
-                std::cout << "[test] [debug] [master] assign RPC requested\n";
-                margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
+            // Find leader of the cluster
+            mraft::ServerInfo leader;
+            int               ret = getLeaderInfo(leader, handle);
+            if (ret == -1) {
+                master_trace("failed getting leader from cluster... exiting");
+                std::exit(1);
             }
+            master_trace("found leader(raft_id=" << leader.id << ", addr="
+                                                 << leader.address << ")");
+            margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
+
+            // Request add RPC to leader
+            master_trace("requesting add(raft_id=" << raftId << ", addr="
+                                                   << worker_addr_str
+                                                   << ") to leader");
+            rpcs["add"].on(handle)(raftId, worker_addr_str);
+            margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
+
+            // Request assign RPC to leader
+            master_trace("requesting assign(raft_id="
+                         << raftId
+                         << ", role=" << static_cast<int>(mraft::Role::VOTER)
+                         << ") to leader");
+            rpcs["assign"].on(handle)(raftId, mraft::Role::VOTER);
+            margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
         }
     }
 
     void removeWorker(int raftId)
     {
-        mraft::ServerInfo   leader;
-        tl::provider_handle handle;
-        int                 ret = getLeaderInfo(leader, handle);
-        if (ret == -1) {
-            std::cerr << "[test] [debug] [master] failed getting leader from "
-                         "cluster\n";
-            exit(1);
-        }
-        std::cout << "[test] [debug] [master] RPC leader found raftId="
-                  << leader.id << ", addr='" << leader.address
-                  << "'. Provider found is " << handle << "\n";
-        margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
-        std::cout << "[test] [debug] [master] sending remove RPC request to "
-                     "raftId="
-                  << leader.id << ", addr='" << leader.address << "'\n";
+        master_trace(
+            "preparing to request to remove worker with raft_id=" << raftId);
+
+        // Request the worker to remove itself from the cluster
+        std::string         worker_addr = raftAddrs[raftId];
+        tl::provider_handle handle(engine.lookup(worker_addr), raftId);
+        master_trace("requesting remove to worker(raft_id="
+                     << raftId << ", addr=" << worker_addr << ")");
         rpcs["remove"].on(handle)(raftId);
-        std::cout << "[test] [debug] [master] completed remove RPC request\n";
         margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
 
-        shutdownWorker(raftId);
+        // Request leader to remove the shutdown process from the cluster
+        master_trace("requesting shutdown to worker(raft_id=" << raftId << ")");
+        rpcs["shutdown"].on(handle)();
+        raftAddrs.erase(raftId);
+        margo_thread_sleep(engine.get_margo_instance(), 500);
     }
 
     void shutdownWorker(int raftId)
     {
-        std::string worker_addr = raftAddrs[raftId];
-        std::cout << "[test] [debug] [master] sending shutdown RPC request to "
-                     "raftId="
-                  << raftId << ", addr='" << worker_addr << "'\n";
-        tl::provider_handle handle(engine.lookup(worker_addr), raftId);
-        rpcs["shutdown"].on(handle)();
-        std::cout << "[test] [debug] [master] completed shutdown RPC request\n";
-        raftAddrs.erase(raftId);
-        margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
-    }
+        master_trace(
+            "preparing to request to shutdown worker with raft_id=" << raftId);
 
-    void killWorker(pid_t workerPid)
-    {
-        kill(workerPid, SIGTERM);
-        // TODO: Remove from raftAddrs ???
-    }
-
-    void sendDataToRaftCluster(const std::string& data)
-    {
-        std::cout << "[test] [debug] [master] sending data=" << data << "\n";
+        // Find leader of the cluster
         mraft::ServerInfo   leader;
         tl::provider_handle handle;
         int                 ret = getLeaderInfo(leader, handle);
         if (ret == -1) {
-            std::cerr << "[test] [debug] [master] failed getting leader from "
-                         "cluster\n";
+            master_trace("failed getting leader from cluster... exiting");
             std::exit(1);
         }
-        std::cout << "[test] [debug] [master] RPC leader found raftId="
-                  << leader.id << ", addr='" << leader.address
-                  << "'. Provider found is " << handle << "\n";
+        master_trace("found leader(raft_id=" << leader.id << ", addr="
+                                             << leader.address << ")");
         margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
-        std::cout << "[test] [debug] [master] sending apply RPC request to "
-                     "raftId="
-                  << leader.id << ", addr='" << leader.address << "'\n";
+
+        // Request leader to remove the shutdown process from the cluster
+        master_trace("requesting remove(raft_id=" << raftId << ") to leader");
+        rpcs["remove"].on(handle)(raftId);
+        margo_thread_sleep(engine.get_margo_instance(), 500);
+
+        // Check that the worker's FSM is up to date with the correct values
+        std::string worker_addr = raftAddrs[raftId];
+        handle = tl::provider_handle(engine.lookup(worker_addr), raftId);
+        master_trace("requesting get_fsm_content to worker(raft_id="
+                     << raftId << ", addr=" << worker_addr << ")");
+        std::string worker_fsm_content = rpcs["get_fsm_content"].on(handle)();
+        margo_assert(engine.get_margo_instance(),
+                     worker_fsm_content == expected_fsm_content);
+        margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
+
+        // Request the worker to shutdown
+        master_trace("requesting shutdown(raft_id="
+                     << raftId << ", addr=" << worker_addr << ") to leader");
+        rpcs["shutdown"].on(handle)();
+        raftAddrs.erase(raftId);
+        margo_thread_sleep(engine.get_margo_instance(), 500);
+    }
+
+    void killWorker(pid_t workerPid)
+    {
+        // Find leader of the cluster
+        mraft::ServerInfo   leader;
+        tl::provider_handle handle;
+        int                 ret = getLeaderInfo(leader, handle);
+        if (ret == -1) {
+            master_trace("failed getting leader from cluster... exiting");
+            std::exit(1);
+        }
+        master_trace("found leader(raft_id=" << leader.id << ", addr="
+                                             << leader.address << ")");
+        margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
+
+        // Request leader to remove the killed worker from the cluster
+        raft_id worker_raft_id = pidToRaftId[workerPid];
+        master_trace("requesting remove(raft_id=" << worker_raft_id
+                                                  << ") to leader");
+        rpcs["remove"].on(handle)(worker_raft_id);
+        pidToRaftId.erase(workerPid);
+        raftAddrs.erase(worker_raft_id);
+        margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
+
+        // Kill the worker
+        master_trace("killing worker with pid=" << workerPid);
+        kill(workerPid, SIGTERM);
+        margo_thread_sleep(engine.get_margo_instance(), 500);
+    }
+
+    void sendDataToRaftCluster(const std::string& data)
+    {
+        master_trace("preparing to request to apply with data=" << data);
+
+        // Find leader of the cluster
+        mraft::ServerInfo   leader;
+        tl::provider_handle handle;
+        int                 ret = getLeaderInfo(leader, handle);
+        if (ret == -1) {
+            master_trace("failed getting leader from cluster... exiting");
+            std::exit(1);
+        }
+        master_trace("found leader(raft_id=" << leader.id << ", addr="
+                                             << leader.address << ")");
+        margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
+
+        master_trace("requesting apply(data=" << data << ") to leader");
         rpcs["apply"].on(handle)(data);
-        std::cout << "[test] [debug] [master] completed apply RPC request\n";
+        margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
+    }
+
+    void suspendWorker(raft_id raftId, double timeout_ms)
+    {
+        master_trace("preparing to request to suspend worker with raft_id="
+                     << raftId << " for " << timeout_ms << " ms");
+
+        std::string worker_addr = raftAddrs[raftId];
+        master_trace("requesting suspend(timeout_ms="
+                     << timeout_ms << ") to worker(raft_id=" << raftId
+                     << ", addr=" << worker_addr << ")");
+        tl::provider_handle handle(engine.lookup(worker_addr), raftId);
+        rpcs["suspend"].on(handle)(timeout_ms);
+
         margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
     }
 
     int getLeaderInfo(mraft::ServerInfo& leader, tl::provider_handle& handle)
     {
         for (auto it = raftAddrs.cbegin(); it != raftAddrs.cend(); it++) {
-            std::cout << "[test] [debug] [master] requested leader RPC to "
-                         "raftId="
-                      << it->first << ", addr='" << it->second << "'\n";
+            master_trace("requesting get_leader RPC to worker with raft_id="
+                         << it->first << ", addr=" << it->second);
             handle = tl::provider_handle(engine.lookup(it->second), it->first);
-            leader = rpcs["leader"].on(handle)();
-            std::cout
-                << "[test] [debug] [master] completed leader RPC request\n";
+            leader = rpcs["get_leader"].on(handle)();
             if (leader.id != 0) return 0;
+            master_trace("the worker couldn't find a leader... trying again");
             margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
         }
         return -1;
@@ -518,9 +549,9 @@ int parseCommandLineArgs(int argc, char* argv[], char** filename)
         case '?':
         default:
             // Handle unrecognized options or missing arguments
-            std::cerr << "[test] [debug] [master] unrecognized option or "
-                         "missing argument\n";
-            return -1;
+            master_trace("unrecognized option or missing argument");
+            std::cerr << "usage: " << argv[0] << " -f <file> | --file=<file>\n";
+            std::exit(1);
         }
     }
     return 0;
@@ -530,35 +561,21 @@ int parseCommandLineArgs(int argc, char* argv[], char** filename)
 int main(int argc, char* argv[])
 {
     tl::engine engine("tcp", THALLIUM_SERVER_MODE);
-    std::cout << "[test] [debug] [master] created tl::engine of mid="
-              << engine.get_margo_instance() << "\n";
 
     // Parse command-line arguments
     char* filename = nullptr;
-    if (parseCommandLineArgs(argc, argv, &filename) < 0) {
-        std::cerr
-            << "[test] [debug] [master] error parsing command-line arguments"
-            << std::endl;
-        return 1;
-    };
+    parseCommandLineArgs(argc, argv, &filename);
     std::ifstream inputFile;
     std::istream* input
         = (!filename) ? &std::cin : (inputFile.open(filename), &inputFile);
-
-    std::cout << "[test] [debug] [master] parsed command-line arguments"
-              << "\n";
 
     Master master(engine);
 
     master.readInput(*input);
 
-    std::cout << "[test] [debug] [master] sleeping for 10 seconds"
-              << "\n";
-    margo_thread_sleep(engine.get_margo_instance(), 10 * 1000);
+    master_trace("sleeping...");
+    margo_thread_sleep(engine.get_margo_instance(), 3 * 1000);
 
-    engine.finalize();
-
-    std::cout << "[test] [debug] [master] engine finalized\n";
-
+    master_trace("exiting program");
     return 0;
 }

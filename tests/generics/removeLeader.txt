@@ -2,7 +2,8 @@ add 1
 sleep 1000
 add 2
 sleep 1000
-shutdown 2
+apply hello
 sleep 1000
-add 2
+remove 1
 sleep 1000
+apply world

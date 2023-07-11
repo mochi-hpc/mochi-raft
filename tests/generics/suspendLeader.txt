@@ -1,0 +1,12 @@
+add 1
+sleep 1000
+add 2
+sleep 1000
+add 3
+sleep 1000
+apply hello
+sleep 1000
+suspend 1 30000
+sleep 15000
+add 4
+apply world
