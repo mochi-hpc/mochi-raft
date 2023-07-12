@@ -96,6 +96,7 @@ static int memory_log_bootstrap(struct mraft_log*                log,
     last->term              = 1;
     last->type              = RAFT_CHANGE;
     raft_configuration_encode(conf, &last->buf);
+#if 0
     mlog->last_snapshot.index               = 0;
     mlog->last_snapshot.term                = 1;
     mlog->last_snapshot.configuration_index = 0;
@@ -109,6 +110,7 @@ static int memory_log_bootstrap(struct mraft_log*                log,
                                conf->servers[i].id, conf->servers[i].address,
                                conf->servers[i].role);
     }
+#endif
     return 0;
 }
 
