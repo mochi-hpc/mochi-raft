@@ -70,29 +70,11 @@ static void tracer_emit(struct raft_tracer* t,
     margo_debug(mid, "[craft] [%s:%d] %s", file, line, message);
 }
 
-static int check_log_values(struct mraft_log* log)
+static int check_log_values(struct myfsm* myfsm)
 {
-    struct raft_entry* entries   = NULL;
-    unsigned           n_entries = 0;
-    int ret = mraft_memory_log_get_entries(log, &entries, &n_entries);
-    if (ret != 0) return -1;
-
-    int expected[N_ENTRIES];
-
-    for (unsigned i = 0; i < n_entries; i++) {
-        size_t len = entries[i].buf.len;
-        if (len != 5) continue; /* To ignore the FSM "garbage" entries */
-
-        char* buf = (char*)entries[i].buf.base;
-        char  rank;
-        int   n;
-        sscanf(buf, "%c%03d", &rank, &n);
-        expected[n] = 1;
-    }
-    for (unsigned i = 0; i < N_ENTRIES; i++)
-        if (expected[i] == 0) return -1;
-
-    return 0;
+    // clang-format off
+    return strcmp((char*)myfsm->content, "A000A001A002A003A004A005A006A007A008A009A010A011A012A013A014A015");
+    // clang-format on
 }
 
 struct error_recovery {
@@ -272,7 +254,7 @@ int main(int argc, char** argv)
     /* Check that the process has the correct log despite being temporarily
      * disabled */
     if (rank == 1) {
-        ret = check_log_values(&log);
+        ret = check_log_values(&myfsm);
         margo_assert(mid, ret == 0);
     }
 
