@@ -36,8 +36,6 @@ endif ()
 
 # search for margo
 pkg_check_modules (MARGO REQUIRED IMPORTED_TARGET margo)
-# search for thallium
-pkg_check_modules (THALLIUM REQUIRED IMPORTED_TARGET thallium)
 # search for c-raft
 pkg_check_modules (RAFT REQUIRED IMPORTED_TARGET raft)
 # search for uuid
