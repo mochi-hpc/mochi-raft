@@ -1,0 +1,11 @@
+
+add 1
+sleep 1000
+add 2
+sleep 1000
+add 3
+sleep 1000
+shutdown 2
+sleep 1000
+remove 3
+sleep 1000

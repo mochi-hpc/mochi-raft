@@ -1,6 +1,7 @@
 enable_testing ()
 
 find_package (MPI REQUIRED)
+find_package (thallium REQUIRED)
 
 add_executable (simple-test simple-test.c)
 target_link_libraries (simple-test PUBLIC mochi-raft PkgConfig::SSG MPI::MPI_C)
@@ -10,3 +11,6 @@ target_link_libraries (error-recovery PUBLIC mochi-raft PkgConfig::SSG MPI::MPI_
 
 add_executable (mraft_get_raft_id mraft_get_raft_id.c)
 target_link_libraries (mraft_get_raft_id PUBLIC mochi-raft PkgConfig::SSG MPI::MPI_C)
+
+add_executable (generic-test generic-test.cpp)
+target_link_libraries (generic-test PUBLIC mochi-raft thallium)
