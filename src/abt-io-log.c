@@ -11,8 +11,6 @@
 #include "abt-io-macros.h"
 #include "abt-io-log-helpers.h"
 
-#define N_ENTRIES 100
-
 #define FILENAME_LEN 40
 
 #define ENTRY_FILE_MAX_SIZE (128 * 1024)
@@ -34,6 +32,8 @@ static int abt_io_log_load(struct mraft_log*      log,
     int                fd;
     size_t             n_entry_files;
     char               filename[FILENAME_LEN];
+    printf("[test] [debug] [abt-io] inside abt_io_log_load for raft_id=%llu\n",
+           abtlog->id);
 
     /* Read metadata (i.e. term, voted_for, n_entries, n_entry_files) */
     snprintf(filename, FILENAME_LEN, "metadata-%020llu", abtlog->id);
@@ -58,7 +58,6 @@ static int abt_io_log_load(struct mraft_log*      log,
         off_t offset = sizeof(filesize);
         while (offset < filesize) {
             struct raft_entry* entry = &(*entries)[i];
-            entry->batch             = NULL;
             int ret = _read_entry(abtlog->aid, fd, offset, entry);
             i++;
             offset += ret;
@@ -91,6 +90,10 @@ static int abt_io_log_bootstrap(struct mraft_log*                log,
     int                fd;
     off_t              offset;
     char               filename[FILENAME_LEN];
+    printf(
+        "[test] [debug] [abt-io] inside abt_io_log_bootstrap for "
+        "raft_id=%llu\n",
+        abtlog->id);
 
     /* Persist the current term to 1 and the vote to nil */
     snprintf(filename, FILENAME_LEN, "metadata-%020llu", abtlog->id);
@@ -110,6 +113,7 @@ static int abt_io_log_bootstrap(struct mraft_log*                log,
                                       .type  = RAFT_CHANGE,
                                       .buf   = {.len = 0, .base = NULL}};
     raft_configuration_encode(conf, &entry.buf);
+    printf("[test] [debug] [abt-io] bootstrap: buf.len=%lu\n", entry.buf.len);
     ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY, &fd);
     _write_entry(abtlog->aid, fd, sizeof(off_t), &entry);
     ABT_IO_CLOSE(abtlog->aid, fd);
@@ -160,6 +164,10 @@ static int abt_io_log_set_term(struct mraft_log* log, raft_term term)
     raft_id            voted_for = 0;
     int                fd;
     char               filename[FILENAME_LEN];
+    printf(
+        "[test] [debug] [abt-io] inside abt_io_log_set_term for raft_id=%llu, "
+        "term=%llu\n",
+        abtlog->id, term);
 
     snprintf(filename, FILENAME_LEN, "metadata-%020llu", abtlog->id);
     ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY, &fd);
@@ -175,6 +183,10 @@ static int abt_io_log_set_vote(struct mraft_log* log, raft_id server_id)
     struct abt_io_log* abtlog = (struct abt_io_log*)log->data;
     int                fd;
     char               filename[FILENAME_LEN];
+    printf(
+        "[test] [debug] [abt-io] inside abt_io_log_set_vote for raft_id=%llu, "
+        "server_id=%llu\n",
+        abtlog->id, server_id);
 
     snprintf(filename, FILENAME_LEN, "metadata-%020llu", abtlog->id);
     ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY, &fd);
@@ -194,6 +206,9 @@ static int abt_io_log_append(struct mraft_log*       log,
     int                entry_fd;
     int                mapping_fd;
     char               filename[FILENAME_LEN];
+    printf(
+        "[test] [debug] [abt-io] inside abt_io_log_append for raft_id=%llu\n",
+        abtlog->id);
 
     /* Get the current number of entries (n_entries) */
     snprintf(filename, FILENAME_LEN, "metadata-%020llu", abtlog->id);
@@ -250,7 +265,7 @@ static int abt_io_log_append(struct mraft_log*       log,
         /* Write the mapping in the mapping file */
         size_t entry_file = n_entry_files - 1;
         _write_mapping(abtlog->aid, mapping_fd,
-                       (n_entries - 1)
+                       (n_entries == 0 ? 0 : (n_entries - 1))
                            * (sizeof(entry_file) + sizeof(entry_offset)),
                        &entry_file, &entry_offset);
 
@@ -271,6 +286,9 @@ static int abt_io_log_truncate(struct mraft_log* log, raft_index index)
     struct abt_io_log* abtlog = (struct abt_io_log*)log->data;
     int                fd;
     char               filename[FILENAME_LEN];
+    printf(
+        "[test] [debug] [abt-io] inside abt_io_log_truncate for raft_id=%llu\n",
+        abtlog->id);
 
     snprintf(filename, FILENAME_LEN, "metadata-%020llu", abtlog->id);
     size_t n_entry_files;
@@ -326,7 +344,8 @@ static int abt_io_log_snapshot_put(struct mraft_log*           log,
                                    const struct raft_snapshot* snapshot)
 {
     // TODO:
-    fprintf(stderr, "[abtlog] [error] abt_io_log_recover not implemented\n");
+    fprintf(stderr,
+            "[abtlog] [error] abt_io_log_snapshot_put not implemented\n");
     return RAFT_NOTFOUND;
 }
 
@@ -335,8 +354,75 @@ static int abt_io_log_snapshot_get(struct mraft_log*            log,
                                    raft_io_snapshot_get_cb      cb)
 {
     // TODO:
-    fprintf(stderr, "[abtlog] [error] abt_io_log_recover not implemented\n");
+    fprintf(stderr,
+            "[abtlog] [error] abt_io_log_snapshot_get not implemented\n");
     return RAFT_NOTFOUND;
+}
+
+/**
+ * @brief Write default values in the abt-io-log files.
+ * We need to do this because if a process doesn't call bootstrap, and then
+ * gets added to a cluster, it will call mraft_start, which will call
+ * log->load(). Then we will read from the files and get random values,
+ * because those files are empty.
+ *
+ * We don't have this problem is the memory log because we call calloc, which
+ * default initializes all values for us.
+ *
+ * We wan't this to write defaults to the file IF it doesn't already exist,
+ * meaning that the process has just spawned and never existed before.
+ * If a process crashed but it restarts with the same ID, we don't want to
+ * overwrite its metadata file
+ */
+static int abt_io_write_default(struct abt_io_log* abtlog)
+{
+    int    fd;
+    mode_t mode = 0644;
+    char   filename[FILENAME_LEN];
+
+    snprintf(filename, FILENAME_LEN, "metadata-%020llu", abtlog->id);
+    fd = abt_io_open(abtlog->aid, filename, O_CREAT | O_EXCL, mode);
+    if (fd < 0) {
+        static raft_term current_term  = 0;
+        static raft_id   voted_for     = 0;
+        static size_t    n_entries     = 0;
+        static size_t    n_entry_files = 1;
+        ABT_IO_OPEN(abtlog->aid, filename, O_CREAT | O_WRONLY, &fd);
+        _write_metadata(abtlog->aid, fd, &current_term, &voted_for, &n_entries,
+                        &n_entry_files);
+        ABT_IO_CLOSE(abtlog->aid, fd);
+
+        /* Persist that there are 0 entries in the first entry file */
+        snprintf(filename, FILENAME_LEN, "entry-000-%020llu", abtlog->id);
+        off_t filesize = sizeof(filesize);
+        ABT_IO_OPEN(abtlog->aid, filename, O_CREAT | O_WRONLY, &fd);
+        ABT_IO_PWRITE(abtlog->aid, fd, &filesize, sizeof(filesize), 0);
+        ABT_IO_CLOSE(abtlog->aid, fd);
+        /* The file already existed, meaning the process had already called
+         * mraft_start, or even maybe had some entries, so we don't do anything,
+         * we keep whatever data the process had stored before its crash */
+        fprintf(stderr,
+                "[test] [debug] [abt-io-log] metadata file for raft_id=%llu "
+                "already existed, not writing defaults\n",
+                abtlog->id);
+        return 0;
+    }
+    static raft_term current_term  = 0;
+    static raft_id   voted_for     = 0;
+    static size_t    n_entries     = 0;
+    static size_t    n_entry_files = 1;
+    ABT_IO_OPEN(abtlog->aid, filename, O_CREAT | O_WRONLY, &fd);
+    _write_metadata(abtlog->aid, fd, &current_term, &voted_for, &n_entries,
+                    &n_entry_files);
+    ABT_IO_CLOSE(abtlog->aid, fd);
+
+    /* Persist that there are 0 entries in the first entry file */
+    snprintf(filename, FILENAME_LEN, "entry-000-%020llu", abtlog->id);
+    off_t filesize = sizeof(filesize);
+    ABT_IO_OPEN(abtlog->aid, filename, O_CREAT | O_WRONLY, &fd);
+    ABT_IO_PWRITE(abtlog->aid, fd, &filesize, sizeof(filesize), 0);
+    ABT_IO_CLOSE(abtlog->aid, fd);
+    return 0;
 }
 
 void mraft_abt_io_log_init(struct mraft_log* log, raft_id id)
@@ -363,16 +449,14 @@ void mraft_abt_io_log_init(struct mraft_log* log, raft_id id)
     abtlog->id                = id;
     log->data                 = abtlog;
 
-    /* Create each of the files */
+    /* Create each of the files if not already done */
     int    fd;
-    int    flags = O_WRONLY | O_CREAT | O_EXCL;
+    int    flags = O_CREAT;
     mode_t mode  = 0644;
     char   filename[FILENAME_LEN];
 
     /* Metadata file */
-    snprintf(filename, FILENAME_LEN, "metadata-%020llu", id);
-    fd = abt_io_open(aid, filename, flags, mode);
-    abt_io_close(aid, fd);
+    abt_io_write_default(abtlog);
 
     /* Entry file */
     snprintf(filename, FILENAME_LEN, "entry-000-%020llu", id);

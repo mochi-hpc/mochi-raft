@@ -63,6 +63,7 @@ DEFINE_METADATA_HANDLER(write, ABT_IO_PWRITE)
                      offset + sizeof(entry->term));                         \
         ABT_IO_MACRO(abtio, fd, &entry->buf.len, sizeof(entry->buf.len),    \
                      offset + sizeof(entry->term) + sizeof(entry->type));   \
+        entry->batch = NULL;                                                \
                                                                             \
         /* Either for allocation, or writing filesize */                    \
         INSERT_CODE                                                         \

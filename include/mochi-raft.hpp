@@ -8,6 +8,7 @@
 
 #include <mochi-raft.h>
 #include <mochi-raft-memory-log.h>
+#include <mochi-raft-abt-io-log.h>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -463,6 +464,66 @@ class MemoryLog : public Log {
     }
 };
 
+class AbtIoLog : public Log {
+
+  private:
+    mraft_log m_log;
+
+  public:
+    AbtIoLog(raft_id raftId) { mraft_abt_io_log_init(&m_log, raftId); }
+
+    ~AbtIoLog() { mraft_abt_io_log_finalize(&m_log); }
+
+    void load(raft_term*             term,
+              raft_id*               id,
+              struct raft_snapshot** snap,
+              raft_index*            start_index,
+              struct raft_entry*     entries[],
+              size_t*                n_entries) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(load, term, id, snap, start_index, entries,
+                              n_entries);
+    }
+
+    void bootstrap(const struct raft_configuration* config) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(bootstrap, config);
+    }
+
+    void recover(const struct raft_configuration* config) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(recover, config);
+    }
+
+    void set_term(raft_term term) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(set_term, term);
+    }
+
+    void set_vote(raft_id id) override { MRAFT_WRAP_C_LOG_CALL(set_vote, id); }
+
+    void append(const struct raft_entry entries[], unsigned n_entries) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(append, entries, n_entries);
+    }
+
+    void truncate(raft_index index) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(truncate, index);
+    }
+
+    void snapshot_put(unsigned                    trailing,
+                      const struct raft_snapshot* snap) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(snapshot_put, trailing, snap);
+    }
+
+    void snapshot_get(struct raft_io_snapshot_get* req,
+                      raft_io_snapshot_get_cb      cb) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(snapshot_get, req, cb);
+    }
+};
 } // namespace mraft
 
 #undef MRAFT_WRAP_CPP_LOG_CALL
