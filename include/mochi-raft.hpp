@@ -104,10 +104,14 @@ struct ServerInfo {
 
 class Raft {
 
-    raft_fsm  m_raft_fsm;
-    mraft_log m_raft_log;
-    raft_io   m_raft_io;
-    raft      m_raft;
+    using emit_fn = std::function<void(const char*, int, const char*)>;
+
+    raft_fsm    m_raft_fsm;
+    mraft_log   m_raft_log;
+    raft_io     m_raft_io;
+    raft_tracer m_raft_tracer;
+    emit_fn     m_emit_fn;
+    raft        m_raft;
 
   public:
     Raft(margo_instance_id mid,
@@ -147,6 +151,10 @@ class Raft {
         m_raft_log.truncate     = _log_truncate;
         m_raft_log.snapshot_put = _log_snapshot_put;
         m_raft_log.snapshot_get = _log_snapshot_get;
+
+        m_raft_tracer.impl    = static_cast<void*>(&m_emit_fn);
+        m_raft_tracer.enabled = false;
+        m_raft_tracer.emit    = _tracer_emit;
 
         mraft_io_init_args io_init_args = {mid, pool, provider_id, &m_raft_log};
         ret = mraft_io_init(&io_init_args, &m_raft_io);
@@ -261,6 +269,15 @@ class Raft {
         return leader;
     }
 
+    void enable_tracer(bool enable) {
+        m_raft_tracer.enabled = enable;
+    }
+
+    template<typename F>
+    void set_tracer(F&& f) {
+        m_emit_fn = std::forward<F>(f);
+    }
+
   private:
 #define MRAFT_WRAP_CPP_LOG_CALL(func, ...)          \
     do {                                            \
@@ -361,6 +378,15 @@ class Raft {
     static int _fsm_restore(struct raft_fsm* fsm, struct raft_buffer* buf)
     {
         MRAFT_WRAP_CPP_FSM_CALL(restore, buf);
+    }
+
+    static void _tracer_emit(struct raft_tracer* tracer,
+                             const char* file,
+                             int line,
+                             const char* message)
+    {
+        auto emit = static_cast<emit_fn*>(tracer->impl);
+        if(emit && *emit) (*emit)(file, line, message);
     }
 };
 
