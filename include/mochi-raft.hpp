@@ -163,6 +163,7 @@ class Raft {
         MRAFT_CHECK_RET_AND_RAISE(ret, mraft_io_init);
         ret = mraft_init(&m_raft, &m_raft_io, &m_raft_fsm, id, self_addr_str);
         MRAFT_CHECK_RET_AND_RAISE(ret, mraft_init);
+        m_raft.tracer = &m_raft_tracer;
     }
 
     ~Raft()
