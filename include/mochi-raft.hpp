@@ -104,13 +104,15 @@ struct ServerInfo {
 
 class Raft {
 
-    using emit_fn = std::function<void(const char*, int, const char*)>;
+  public:
+    using tracer_fn = std::function<void(const char*, int, const char*)>;
 
+  private:
     raft_fsm    m_raft_fsm;
     mraft_log   m_raft_log;
     raft_io     m_raft_io;
     raft_tracer m_raft_tracer;
-    emit_fn     m_emit_fn;
+    tracer_fn     m_tracer_fn;
     raft        m_raft;
 
   public:
@@ -152,7 +154,7 @@ class Raft {
         m_raft_log.snapshot_put = _log_snapshot_put;
         m_raft_log.snapshot_get = _log_snapshot_get;
 
-        m_raft_tracer.impl    = static_cast<void*>(&m_emit_fn);
+        m_raft_tracer.impl    = static_cast<void*>(&m_tracer_fn);
         m_raft_tracer.enabled = false;
         m_raft_tracer.emit    = _tracer_emit;
 
@@ -273,9 +275,8 @@ class Raft {
         m_raft_tracer.enabled = enable;
     }
 
-    template<typename F>
-    void set_tracer(F&& f) {
-        m_emit_fn = std::forward<F>(f);
+    void set_tracer(tracer_fn f) {
+        m_tracer_fn = std::move(f);
     }
 
   private:
@@ -385,7 +386,7 @@ class Raft {
                              int line,
                              const char* message)
     {
-        auto emit = static_cast<emit_fn*>(tracer->impl);
+        auto emit = static_cast<tracer_fn*>(tracer->impl);
         if(emit && *emit) (*emit)(file, line, message);
     }
 };
