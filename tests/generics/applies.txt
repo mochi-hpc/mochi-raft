@@ -1,5 +1,0 @@
-add 1
-add 2
-apply hello
-add 3
-apply world

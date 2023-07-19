@@ -4,6 +4,7 @@
 #include <iostream>
 #include <map>
 #include <mochi-raft.hpp>
+#include <set>
 #include <signal.h>
 #include <sstream>
 #include <string>
@@ -59,7 +60,10 @@ class MyFSM : public mraft::StateMachine {
 
     void restore(struct raft_buffer* buf) override
     {
+        std::cout << "[test] [debug] restoring\n";
         content.clear();
+        if (!buf || !buf->len) return;
+        std::cout << "content='" << static_cast<char*>(buf->base) << "'\n";
         content.append(std::string(static_cast<char*>(buf->base)));
     }
 };
@@ -255,6 +259,7 @@ class Master {
   private:
     std::map<std::string, tl::remote_procedure> rpcs;
     tl::engine                                  engine;
+    std::set<raft_id>                           seenRaftIds;
     std::map<raft_id, std::string>              raftAddrs;
     std::map<pid_t, raft_id>                    pidToRaftId;
     std::string                                 expected_fsm_content;
@@ -281,6 +286,11 @@ class Master {
             master_trace("failed fork call... exiting");
             std::exit(1);
         } else if (pid == 0) {
+            // char filename[128];
+            // snprintf(filename, 128, "log-%020llu.out", raftId);
+            // freopen(filename, "a+", stdout);
+            // snprintf(filename, 128, "log-%020llu.err", raftId);
+            // freopen(filename, "a+", stderr);
             // Worker (child) process
             worker_trace("spawned with pid=" << getpid());
 
@@ -356,7 +366,10 @@ class Master {
 
             // If we didn't bootstrap, send an RPC to the leader of the cluster
             // asking to add the spawned worker and assign it to raft voter
-            if (raftAddrs.size() == 1) return;
+            if (raftAddrs.size() == 1) {
+                seenRaftIds.insert(raftId);
+                return;
+            }
 
             // Find leader of the cluster
             mraft::ServerInfo leader;
@@ -377,12 +390,24 @@ class Master {
             margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
 
             // Request assign RPC to leader
-            master_trace("requesting assign(raft_id="
-                         << raftId
-                         << ", role=" << static_cast<int>(mraft::Role::VOTER)
-                         << ") to leader");
-            rpcs["assign"].on(handle)(raftId, mraft::Role::VOTER);
+            mraft::Role state = (seenRaftIds.find(raftId) != seenRaftIds.end())
+                                  ? mraft::Role::STANDBY
+                                  : mraft::Role::VOTER;
+            master_trace("requesting assign(raft_id=" << raftId << ", role="
+                                                      << static_cast<int>(state)
+                                                      << ") to leader");
+            rpcs["assign"].on(handle)(raftId, state);
             margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
+            seenRaftIds.insert(raftId);
+            if (state == mraft::Role::STANDBY) {
+                margo_thread_sleep(engine.get_margo_instance(), 5 * 1000);
+                master_trace("requesting assign(raft_id="
+                             << raftId << ", role="
+                             << static_cast<int>(mraft::Role::VOTER)
+                             << ") to leader");
+                rpcs["assign"].on(handle)(raftId, mraft::Role::VOTER);
+                margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
+            }
         }
     }
 

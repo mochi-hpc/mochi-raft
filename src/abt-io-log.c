@@ -65,21 +65,22 @@ static int abt_io_log_load(struct mraft_log*      log,
         ABT_IO_CLOSE(abtlog->aid, fd);
     }
 
-    /* TODO: Deal with snapshots ???*/
-    // Note: a snapshot is redundant in this memory log since we can
-    // load all the entries directly from memory. In a real log, the
-    // snapshot would contain whatever came before all the entries we
-    // are loading.
-    *snapshot = NULL;
-#if 0
     /* Read last snapshot */
-    snprintf(filename, FILENAME_LEN, "snp%020llu", abtlog->id);
+    *snapshot = NULL;
+    snprintf(filename, FILENAME_LEN, "snap-%020llu", abtlog->id);
+    ABT_IO_OPEN(abtlog->aid, filename, O_RDONLY, &fd);
+
+    // Read first line of snapshot file to see if there is a snapshot to read
+    raft_index index;
+    ssize_t read_size = abt_io_pread(abtlog->aid, fd, &index, sizeof(index), 0);
+    if (read_size != sizeof(index)) goto end;
+
     struct raft_snapshot* snap = raft_calloc(1, sizeof(*snap));
-    ABT_IO_OPEN(abtlog->abtio, abtlog->snapshot, O_RDONLY, &fd);
-    _read_snapshot(abtlog->abtio, fd, snap, NULL);
-    ABT_IO_CLOSE(abtlog->abtio, fd);
+    _read_snapshot(abtlog->aid, fd, snap);
     *snapshot = snap;
-#endif
+
+end:
+    ABT_IO_CLOSE(abtlog->aid, fd);
     return 0;
 }
 
@@ -126,35 +127,17 @@ static int abt_io_log_bootstrap(struct mraft_log*                log,
     ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY, &fd);
     _write_mapping(abtlog->aid, fd, entry_number, &entry_file, &entry_offset);
     ABT_IO_CLOSE(abtlog->aid, fd);
-
-    /* TODO: Deal with snapshots ???*/
-#if 0
-    /* Persist last snapshot */
-    snprintf(filename, FILENAME_LEN, "snp%020llu", abtlog->id);
-    static struct raft_buffer   buffer = {.len = 0, .base = NULL};
-    static struct raft_snapshot snap   = {.index               = 0,
-                                          .term                = 1,
-                                          .configuration_index = 0,
-                                          .n_bufs              = 1,
-                                          .bufs                = &buffer};
-    raft_configuration_init(&snap.configuration);
-    for (unsigned i = 0; i < conf->n; i++) {
-        raft_configuration_add(&snap.configuration, conf->servers[i].id,
-                               conf->servers[i].address, conf->servers[i].role);
-    }
-    raft_configuration_close(&snap.configuration);
-    ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY, &fd);
-    _write_snapshot(abtlog->aid, fd, &snap);
-    ABT_IO_CLOSE(abtlog->aid, fd);
-#endif
-    return 0;
 }
 
 static int abt_io_log_recover(struct mraft_log*                log,
                               const struct raft_configuration* conf)
 {
     // TODO:
-    fprintf(stderr, "[abtlog] [error] abt_io_log_recover not implemented\n");
+    struct abt_io_log* abtlog = (struct abt_io_log*)log->data;
+    fprintf(stderr,
+            "[abtlog] [error] abt_io_log_recover not implemented for "
+            "raft_id=%llu\n",
+            abtlog->id);
     return RAFT_NOTFOUND;
 }
 
@@ -343,20 +326,50 @@ static int abt_io_log_snapshot_put(struct mraft_log*           log,
                                    unsigned                    trailing,
                                    const struct raft_snapshot* snapshot)
 {
-    // TODO:
-    fprintf(stderr,
-            "[abtlog] [error] abt_io_log_snapshot_put not implemented\n");
-    return RAFT_NOTFOUND;
+    (void)trailing; // TODO: implement with this by using mapping
+    struct abt_io_log* abtlog = (struct abt_io_log*)log->data;
+    int                fd;
+    char               filename[FILENAME_LEN];
+    printf(
+        "[test] [debug] [abt-io] inside abt_io_log_snapshot_put for "
+        "raft_id=%llu\n",
+        abtlog->id);
+
+    snprintf(filename, FILENAME_LEN, "snap-%020llu", abtlog->id);
+    ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY, &fd);
+    _write_snapshot(abtlog->aid, fd, (struct raft_snapshot*)snapshot);
+    ABT_IO_CLOSE(abtlog->aid, fd);
+    return 0;
 }
 
 static int abt_io_log_snapshot_get(struct mraft_log*            log,
                                    struct raft_io_snapshot_get* req,
                                    raft_io_snapshot_get_cb      cb)
 {
-    // TODO:
-    fprintf(stderr,
-            "[abtlog] [error] abt_io_log_snapshot_get not implemented\n");
-    return RAFT_NOTFOUND;
+    struct abt_io_log* abtlog = (struct abt_io_log*)log->data;
+    int                fd;
+    char               filename[FILENAME_LEN];
+    printf(
+        "[test] [debug] [abt-io] inside abt_io_log_snapshot_get for "
+        "raft_id=%llu\n",
+        abtlog->id);
+
+    /* Read last snapshot */
+    snprintf(filename, FILENAME_LEN, "snap-%020llu", abtlog->id);
+    ABT_IO_OPEN(abtlog->aid, filename, O_RDONLY, &fd);
+
+    /* Read first line of snapshot file to see if there is a snapshot to read */
+    struct raft_snapshot* snapshot = NULL;
+    raft_index            index;
+    ssize_t read_size = abt_io_pread(abtlog->aid, fd, &index, sizeof(index), 0);
+    if (read_size != sizeof(index)) goto end;
+
+    struct raft_snapshot* snap = raft_calloc(1, sizeof(*snap));
+    _read_snapshot(abtlog->aid, fd, snap);
+end:
+    ABT_IO_CLOSE(abtlog->aid, fd);
+    cb(req, snap, 0);
+    return 0;
 }
 
 /**
@@ -507,6 +520,4 @@ void mraft_abt_io_log_finalize(struct mraft_log* log)
 
     free(abtlog);
     memset(log, 0, sizeof(*log));
-
-    // TODO: raft_configuration_close(&mlog->last_snapshot.configuration); ???
 }

@@ -1,9 +1,0 @@
-add 1
-sleep 1000
-add 2
-sleep 1000
-apply hello
-sleep 1000
-remove 1
-sleep 1000
-apply world
