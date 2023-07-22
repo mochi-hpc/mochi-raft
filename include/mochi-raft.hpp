@@ -280,6 +280,10 @@ class Raft {
         m_tracer_fn = std::move(f);
     }
 
+    void set_rpc_timeout(double timeout_ms) {
+        mraft_io_set_rpc_timeout(&m_raft_io, timeout_ms);
+    }
+
   private:
 #define MRAFT_WRAP_CPP_LOG_CALL(func, ...)          \
     do {                                            \

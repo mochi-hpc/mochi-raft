@@ -100,6 +100,16 @@ int mraft_io_init(const struct mraft_io_init_args* args,
 int mraft_io_finalize(struct raft_io* raft_io);
 
 /**
+ * @brief Set the RPC timeout (in milliseconds). The default value is 100ms.
+ *
+ * @param raft_io Raft IO instance.
+ * @param timeout_ms Timeout value.
+ *
+ * @return MRAFT_SUCCESS or other error code.
+ */
+int mraft_io_set_rpc_timeout(struct raft_io* raft_io, double timeout_ms);
+
+/**
  * @see raft_init
  */
 static inline int mraft_init(struct raft*     r,

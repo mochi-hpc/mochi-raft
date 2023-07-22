@@ -56,6 +56,8 @@ int mraft_io_impl_init(struct raft_io *io, raft_id id, const char *address)
     margo_register_data(impl->mid, rpc_id, (void*)io, NULL);
     impl->craft_rpc_id = rpc_id;
 
+    impl->craft_rpc_timeout_ms  = 100.0;
+
     rpc_id = MARGO_REGISTER_PROVIDER(impl->mid, "mraft_apply",
             mraft_apply_in_t, mraft_apply_out_t, mraft_apply_rpc_ult, impl->provider_id, impl->pool);
     margo_register_data(impl->mid, rpc_id, (void*)io, NULL);
@@ -120,6 +122,13 @@ void mraft_io_impl_close(struct raft_io *io, raft_io_close_cb cb)
     margo_deregister(impl->mid, impl->get_raft_id_rpc_id);
     free(impl->self_address);
     if(cb) cb(io);
+}
+
+int mraft_io_set_rpc_timeout(struct raft_io* io, double timeout_ms)
+{
+    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
+    impl->craft_rpc_timeout_ms = timeout_ms;
+    return MRAFT_SUCCESS;
 }
 
 int mraft_io_impl_load(struct raft_io *io,
@@ -256,8 +265,9 @@ int mraft_io_impl_send(struct raft_io *io,
         return MRAFT_ERR_FROM_MERCURY;
     }
 
-    hret = margo_provider_forward(impl->provider_id, h, (void*)&in);
-    if(hret != HG_SUCCESS) {
+    hret = margo_provider_forward_timed(impl->provider_id, h, (void*)&in,
+                                        impl->craft_rpc_timeout_ms);
+    if(hret != HG_SUCCESS && hret != HG_TIMEOUT) {
         margo_error(impl->mid,
             "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
         if(cb) cb(req, RAFT_CANCELED);

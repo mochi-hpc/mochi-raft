@@ -18,6 +18,7 @@ struct mraft_io_impl {
     char*                   self_address;
     struct mraft_log*       log;
     hg_id_t                 craft_rpc_id;
+    _Atomic double          craft_rpc_timeout_ms;
     hg_id_t                 get_raft_id_rpc_id;
     struct {
         hg_id_t apply_rpc_id;
