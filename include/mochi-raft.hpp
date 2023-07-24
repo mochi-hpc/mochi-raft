@@ -164,6 +164,8 @@ class Raft {
         MRAFT_CHECK_RET_AND_RAISE(ret, mraft_io_init);
         ret = mraft_init(&m_raft, &m_raft_io, &m_raft_fsm, id, self_addr_str);
         MRAFT_CHECK_RET_AND_RAISE(ret, mraft_init);
+
+        raft_set_snapshot_threshold(&m_raft, 5);
         m_raft.tracer = &m_raft_tracer;
     }
 
@@ -269,7 +271,7 @@ class Raft {
         raft_leader(const_cast<raft*>(&m_raft), &leader_id, &leader_addr);
         std::string leader_addr_str((!leader_addr) ? "" : leader_addr);
         leader_addr_str.resize(256, '\0');
-        ServerInfo leader = {.id = leader_id, .address = leader_addr};
+        ServerInfo leader = {.id = leader_id, .address = leader_addr_str};
         return leader;
     }
 

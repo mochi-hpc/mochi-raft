@@ -198,7 +198,7 @@ class Master {
     ~Master()
     {
         // Request to all workers to shutdown
-        while (!raftAddrs.empty()) shutdownWorker(raftAddrs.cbegin()->first);
+        while (!cluster.empty()) shutdownWorker(cluster.cbegin()->first);
         engine.finalize();
     }
 
@@ -232,7 +232,7 @@ class Master {
             } else if (command == "apply") {
                 std::string data;
                 std::getline(iss >> std::ws, data);
-                expected_fsm_content.append(data);
+                expectedFsmContent.append(data);
                 sendDataToRaftCluster(data);
             } else if (command == "sleep") {
                 double timeout_ms;
@@ -254,9 +254,9 @@ class Master {
   private:
     std::map<std::string, tl::remote_procedure> rpcs;
     tl::engine                                  engine;
-    std::map<raft_id, std::string>              raftAddrs;
+    std::map<raft_id, std::string>              cluster;
     std::map<pid_t, raft_id>                    pidToRaftId;
-    std::string                                 expected_fsm_content;
+    std::string                                 expectedFsmContent;
 
     /**
      * Spawn a worker process to add to the raft cluster
@@ -327,7 +327,7 @@ class Master {
             margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
 
             // Add raft-id -> worker_addr to mapping
-            raftAddrs.insert({raftId, worker_addr_str});
+            cluster.insert({raftId, worker_addr_str});
             pidToRaftId.insert({pid, raftId});
 
             // Get handle for the spawned worker to make RPC requests to worker
@@ -335,7 +335,7 @@ class Master {
 
             // If its the first spawned worker, send it an RPC requesting to
             // bootstrap the raft cluster
-            if (raftAddrs.size() == 1) {
+            if (cluster.size() == 1) {
                 master_trace("requesting bootstrap RPC to worker with raft_id="
                              << raftId << ", addr=" << worker_addr_str);
                 std::array<mraft::ServerInfo, 1> servers = {mraft::ServerInfo{
@@ -355,7 +355,7 @@ class Master {
 
             // If we didn't bootstrap, send an RPC to the leader of the cluster
             // asking to add the spawned worker and assign it to raft voter
-            if (raftAddrs.size() == 1) return;
+            if (cluster.size() == 1) return;
 
             // Find leader of the cluster
             mraft::ServerInfo leader;
@@ -391,7 +391,7 @@ class Master {
             "preparing to request to remove worker with raft_id=" << raftId);
 
         // Request the worker to remove itself from the cluster
-        std::string         worker_addr = raftAddrs[raftId];
+        std::string         worker_addr = cluster[raftId];
         tl::provider_handle handle(engine.lookup(worker_addr), raftId);
         master_trace("requesting remove to worker(raft_id="
                      << raftId << ", addr=" << worker_addr << ")");
@@ -401,7 +401,7 @@ class Master {
         // Request leader to remove the shutdown process from the cluster
         master_trace("requesting shutdown to worker(raft_id=" << raftId << ")");
         rpcs["shutdown"].on(handle)();
-        raftAddrs.erase(raftId);
+        cluster.erase(raftId);
         margo_thread_sleep(engine.get_margo_instance(), 500);
     }
 
@@ -428,20 +428,20 @@ class Master {
         margo_thread_sleep(engine.get_margo_instance(), 500);
 
         // Check that the worker's FSM is up to date with the correct values
-        std::string worker_addr = raftAddrs[raftId];
+        std::string worker_addr = cluster[raftId];
         handle = tl::provider_handle(engine.lookup(worker_addr), raftId);
         master_trace("requesting get_fsm_content to worker(raft_id="
                      << raftId << ", addr=" << worker_addr << ")");
         std::string worker_fsm_content = rpcs["get_fsm_content"].on(handle)();
         margo_assert(engine.get_margo_instance(),
-                     worker_fsm_content == expected_fsm_content);
+                     worker_fsm_content == expectedFsmContent);
         margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
 
         // Request the worker to shutdown
         master_trace("requesting shutdown(raft_id="
                      << raftId << ", addr=" << worker_addr << ") to leader");
         rpcs["shutdown"].on(handle)();
-        raftAddrs.erase(raftId);
+        cluster.erase(raftId);
         margo_thread_sleep(engine.get_margo_instance(), 500);
     }
 
@@ -465,7 +465,7 @@ class Master {
                                                   << ") to leader");
         rpcs["remove"].on(handle)(worker_raft_id);
         pidToRaftId.erase(workerPid);
-        raftAddrs.erase(worker_raft_id);
+        cluster.erase(worker_raft_id);
         margo_thread_sleep(engine.get_margo_instance(), 2 * 1000);
 
         // Kill the worker
@@ -500,7 +500,7 @@ class Master {
         master_trace("preparing to request to suspend worker with raft_id="
                      << raftId << " for " << timeout_ms << " ms");
 
-        std::string worker_addr = raftAddrs[raftId];
+        std::string worker_addr = cluster[raftId];
         master_trace("requesting suspend(timeout_ms="
                      << timeout_ms << ") to worker(raft_id=" << raftId
                      << ", addr=" << worker_addr << ")");
@@ -512,7 +512,7 @@ class Master {
 
     int getLeaderInfo(mraft::ServerInfo& leader, tl::provider_handle& handle)
     {
-        for (auto it = raftAddrs.cbegin(); it != raftAddrs.cend(); it++) {
+        for (auto it = cluster.cbegin(); it != cluster.cend(); it++) {
             master_trace("requesting get_leader RPC to worker with raft_id="
                          << it->first << ", addr=" << it->second);
             handle = tl::provider_handle(engine.lookup(it->second), it->first);

@@ -35,7 +35,7 @@ static int abt_io_log_load(struct mraft_log*      log,
     printf("[test] [debug] [abt-io] inside abt_io_log_load for raft_id=%llu\n",
            abtlog->id);
 
-    /* Read metadata (i.e. term, voted_for, n_entries, n_entry_files) */
+    /* Read metadata */
     snprintf(filename, FILENAME_LEN, "metadata-%020llu", abtlog->id);
     ABT_IO_OPEN(abtlog->aid, filename, O_RDONLY, &fd);
     _read_metadata(abtlog->aid, fd, term, voted_for, n_entries, &n_entry_files);
@@ -70,7 +70,7 @@ static int abt_io_log_load(struct mraft_log*      log,
     snprintf(filename, FILENAME_LEN, "snap-%020llu", abtlog->id);
     ABT_IO_OPEN(abtlog->aid, filename, O_RDONLY, &fd);
 
-    // Read first line of snapshot file to see if there is a snapshot to read
+    /* Read first line of snapshot file to see if there is a snapshot to read */
     raft_index index;
     ssize_t read_size = abt_io_pread(abtlog->aid, fd, &index, sizeof(index), 0);
     if (read_size != sizeof(index)) goto end;
@@ -102,7 +102,7 @@ static int abt_io_log_bootstrap(struct mraft_log*                log,
     static raft_id   voted_for     = 0;
     static size_t    n_entries     = 1;
     static size_t    n_entry_files = 1;
-    ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY, &fd);
+    ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY | O_TRUNC, &fd);
     _write_metadata(abtlog->aid, fd, &current_term, &voted_for, &n_entries,
                     &n_entry_files);
     ABT_IO_CLOSE(abtlog->aid, fd);
@@ -114,8 +114,7 @@ static int abt_io_log_bootstrap(struct mraft_log*                log,
                                       .type  = RAFT_CHANGE,
                                       .buf   = {.len = 0, .base = NULL}};
     raft_configuration_encode(conf, &entry.buf);
-    printf("[test] [debug] [abt-io] bootstrap: buf.len=%lu\n", entry.buf.len);
-    ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY, &fd);
+    ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY | O_TRUNC, &fd);
     _write_entry(abtlog->aid, fd, sizeof(off_t), &entry);
     ABT_IO_CLOSE(abtlog->aid, fd);
 
@@ -124,7 +123,7 @@ static int abt_io_log_bootstrap(struct mraft_log*                log,
     static size_t entry_number = 0;
     static size_t entry_file   = 0;
     static off_t  entry_offset = sizeof(off_t);
-    ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY, &fd);
+    ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY | O_TRUNC, &fd);
     _write_mapping(abtlog->aid, fd, entry_number, &entry_file, &entry_offset);
     ABT_IO_CLOSE(abtlog->aid, fd);
 }
@@ -190,8 +189,9 @@ static int abt_io_log_append(struct mraft_log*       log,
     int                mapping_fd;
     char               filename[FILENAME_LEN];
     printf(
-        "[test] [debug] [abt-io] inside abt_io_log_append for raft_id=%llu\n",
-        abtlog->id);
+        "[test] [debug] [abt-io] inside abt_io_log_append for raft_id=%llu, "
+        "n_entries=%u\n",
+        abtlog->id, n);
 
     /* Get the current number of entries (n_entries) */
     snprintf(filename, FILENAME_LEN, "metadata-%020llu", abtlog->id);
@@ -248,8 +248,7 @@ static int abt_io_log_append(struct mraft_log*       log,
         /* Write the mapping in the mapping file */
         size_t entry_file = n_entry_files - 1;
         _write_mapping(abtlog->aid, mapping_fd,
-                       (n_entries == 0 ? 0 : (n_entries - 1))
-                           * (sizeof(entry_file) + sizeof(entry_offset)),
+                       n_entries * (sizeof(entry_file) + sizeof(entry_offset)),
                        &entry_file, &entry_offset);
 
         /* Increment the number of entries */
@@ -285,12 +284,12 @@ static int abt_io_log_truncate(struct mraft_log* log, raft_index index)
     off_t  entry_offset;
     ABT_IO_OPEN(abtlog->aid, filename, O_RDWR, &fd);
     _read_mapping(abtlog->aid, fd,
-                  index * (sizeof(entry_file) + sizeof(entry_offset)),
+                  (index - 1) * (sizeof(entry_file) + sizeof(entry_offset)),
                   &entry_file, &entry_offset);
 
     /* Truncate mapping file */
     ABT_IO_FTRUNCATE(abtlog->aid, fd,
-                     index * (sizeof(entry_file) + sizeof(entry_offset)));
+                     (index - 1) * (sizeof(entry_file) + sizeof(entry_offset)));
     ABT_IO_CLOSE(abtlog->aid, fd);
 
     /* Truncate the entry file */
@@ -313,7 +312,7 @@ static int abt_io_log_truncate(struct mraft_log* log, raft_index index)
 
     /* Update n_entries and n_entry_files */
     snprintf(filename, FILENAME_LEN, "metadata-%020llu", abtlog->id);
-    size_t n_entries = index;
+    size_t n_entries = index - 1;
     n_entry_files -= deleted_files;
     ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY, &fd);
     _write_metadata(abtlog->aid, fd, NULL, NULL, &n_entries, &n_entry_files);
@@ -326,19 +325,64 @@ static int abt_io_log_snapshot_put(struct mraft_log*           log,
                                    unsigned                    trailing,
                                    const struct raft_snapshot* snapshot)
 {
-    (void)trailing; // TODO: implement with this by using mapping
     struct abt_io_log* abtlog = (struct abt_io_log*)log->data;
     int                fd;
     char               filename[FILENAME_LEN];
     printf(
         "[test] [debug] [abt-io] inside abt_io_log_snapshot_put for "
-        "raft_id=%llu\n",
-        abtlog->id);
+        "raft_id=%llu, trailing=%u\n",
+        abtlog->id, trailing);
 
     snprintf(filename, FILENAME_LEN, "snap-%020llu", abtlog->id);
     ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY, &fd);
     _write_snapshot(abtlog->aid, fd, (struct raft_snapshot*)snapshot);
     ABT_IO_CLOSE(abtlog->aid, fd);
+
+    /* Delete entries older than snapshot->index - trailing (included) */
+    /* Store as a signed number */
+    if (trailing == 0) {
+        /* `trailing == 0` -> Delete all entries */
+
+        size_t n_entries;
+        size_t n_entry_files;
+        snprintf(filename, FILENAME_LEN, "metadata-%020llu", abtlog->id);
+        ABT_IO_OPEN(abtlog->aid, filename, O_RDONLY, &fd);
+        _read_metadata(abtlog->aid, fd, NULL, NULL, &n_entries, &n_entry_files);
+        ABT_IO_CLOSE(abtlog->aid, fd);
+
+        /* Delete entries in the first entry file */
+        off_t filesize = sizeof(filesize);
+        snprintf(filename, FILENAME_LEN, "entry-000-%020llu", abtlog->id);
+        ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY, &fd);
+        ABT_IO_FTRUNCATE(abtlog->aid, fd, sizeof(filesize));
+        ABT_IO_PWRITE(abtlog->aid, fd, &filesize, sizeof(filesize), 0);
+        ABT_IO_CLOSE(abtlog->aid, fd);
+
+        /* Delete all the mappings */
+        snprintf(filename, FILENAME_LEN, "map-%020llu", abtlog->id);
+        ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY, &fd);
+        ABT_IO_FTRUNCATE(abtlog->aid, fd, 0);
+        ABT_IO_CLOSE(abtlog->aid, fd);
+
+        /* Delete the extra entry files*/
+        for (size_t entry_file = 1; entry_file < n_entry_files; entry_file++) {
+            snprintf(filename, FILENAME_LEN, "entry-%03lu-%020llu", entry_file,
+                     abtlog->id);
+            abt_io_unlink(abtlog->aid, filename);
+        }
+
+        /* Update the metadata file to indicate that we deleted the entries */
+        n_entries     = 0;
+        n_entry_files = 1;
+        snprintf(filename, FILENAME_LEN, "metadata-%020llu", abtlog->id);
+        ABT_IO_OPEN(abtlog->aid, filename, O_WRONLY, &fd);
+        _write_metadata(abtlog->aid, fd, NULL, NULL, &n_entries,
+                        &n_entry_files);
+        ABT_IO_CLOSE(abtlog->aid, fd);
+        return 0;
+    }
+    /* TODO: trailing != 0 */
+
     return 0;
 }
 
@@ -411,6 +455,7 @@ static int abt_io_write_default(struct abt_io_log* abtlog)
         ABT_IO_OPEN(abtlog->aid, filename, O_CREAT | O_WRONLY, &fd);
         ABT_IO_PWRITE(abtlog->aid, fd, &filesize, sizeof(filesize), 0);
         ABT_IO_CLOSE(abtlog->aid, fd);
+
         /* The file already existed, meaning the process had already called
          * mraft_start, or even maybe had some entries, so we don't do anything,
          * we keep whatever data the process had stored before its crash */
@@ -420,6 +465,7 @@ static int abt_io_write_default(struct abt_io_log* abtlog)
                 abtlog->id);
         return 0;
     }
+
     static raft_term current_term  = 0;
     static raft_id   voted_for     = 0;
     static size_t    n_entries     = 0;
@@ -498,21 +544,12 @@ void mraft_abt_io_log_finalize(struct mraft_log* log)
     int fd = abt_io_open(abtlog->aid, filename, O_RDONLY, 0644);
     _read_metadata(abtlog->aid, fd, NULL, NULL, NULL, &n_entry_files);
     abt_io_close(abtlog->aid, fd);
-    // abt_io_unlink(abtlog->aid, filename);
-
-    /* Entry files */
-    for (size_t i = 0ULL; i < n_entry_files; i++) {
-        snprintf(filename, FILENAME_LEN, "entry-%03lu-%020llu", i, abtlog->id);
-        // abt_io_unlink(abtlog->aid, filename);
-    }
 
     /* Snapshot file */
     snprintf(filename, FILENAME_LEN, "snap-%020llu", abtlog->id);
-    // abt_io_unlink(abtlog->aid, filename);
 
     /* Entry map file */
     snprintf(filename, FILENAME_LEN, "map-%020llu", abtlog->id);
-    // abt_io_unlink(abtlog->aid, filename);
 
     /* Finalize ABT_IO */
     abt_io_finalize(abtlog->aid);
