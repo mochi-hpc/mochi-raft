@@ -30,7 +30,7 @@ extern "C" {
 #define ABT_IO_PREAD(abtio, fd, buf, size, offset)                       \
     do {                                                                 \
         ssize_t _ret = abt_io_pread(abtio, fd, buf, size, offset);       \
-        if (_ret < 0) {                                                  \
+        if (_ret < 0 || _ret != size) {                                  \
             return _abt_io_error_handler(abtio, fd, ABT_IO_ERROR_PREAD); \
         }                                                                \
     } while (0)
@@ -38,7 +38,7 @@ extern "C" {
 #define ABT_IO_PWRITE(abtio, fd, buf, size, offset)                       \
     do {                                                                  \
         ssize_t _ret = abt_io_pwrite(abtio, fd, buf, size, offset);       \
-        if (_ret < 0) {                                                   \
+        if (_ret < 0 || _ret != size) {                                   \
             return _abt_io_error_handler(abtio, fd, ABT_IO_ERROR_PWRITE); \
         }                                                                 \
     } while (0)

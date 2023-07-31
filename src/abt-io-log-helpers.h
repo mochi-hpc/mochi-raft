@@ -28,8 +28,10 @@ int _abt_io_error_handler(abt_io_instance_id abtio, int fd, int error_code);
  * `term`
  * @param voted_for If not NULL, Read the current voted for from the metadata
  * file into `voted_for`
- * @param n_entries If not NULL, Read the number of entries from the metadata
- * file into `n_entries`
+ * @param current_entries If not NULL, read the current number of entries to
+ * the metadata file.
+ * @param deleted_entries If not NULL, read the number of entries that have
+ * been deleted to the metadata file.
  * @param n_entry_files If not NULL, Read the number of entry files from the
  * metadata file into `n_entry_files`
  * @returns 0 on success, ABT_IO_PREAD_ERROR on failure
@@ -38,7 +40,8 @@ int _read_metadata(abt_io_instance_id abtio,
                    int                fd,
                    raft_term*         term,
                    raft_id*           voted_for,
-                   size_t*            n_entries,
+                   size_t*            current_entries,
+                   size_t*            deleted_entries,
                    size_t*            n_entry_files);
 
 /**
@@ -48,8 +51,10 @@ int _read_metadata(abt_io_instance_id abtio,
  * @param term If not NULL, write the current term to the metadata file.
  * @param voted_for If not NULL, write the current voted for to the metadata
  * file.
- * @param n_entries If not NULL, write the number of entries to the metadata
- * file.
+ * @param current_entries If not NULL, write the current number of entries to
+ * the metadata file.
+ * @param deleted_entries If not NULL, write the number of entries that have
+ * been deleted to the metadata file.
  * @param n_entry_files If not NULL, write the number of entry files to the
  * metadata file.
  * @returns 0 on success, ABT_IO_PWRITE_ERROR on failure
@@ -58,7 +63,8 @@ int _write_metadata(abt_io_instance_id abtio,
                     int                fd,
                     raft_term*         term,
                     raft_id*           voted_for,
-                    size_t*            n_entries,
+                    size_t*            current_entries,
+                    size_t*            deleted_entries,
                     size_t*            n_entry_files);
 
 /**
@@ -94,9 +100,9 @@ int _write_entry(abt_io_instance_id abtio,
  * @param snap The snapshot to read into
  * @returns 0 on success, ABT_IO_PREAD_ERROR on failure.
  */
-int _read_snapshot(abt_io_instance_id               abtio,
-                   int                              fd,
-                   struct raft_snapshot*            snap);
+int _read_snapshot(abt_io_instance_id    abtio,
+                   int                   fd,
+                   struct raft_snapshot* snap);
 
 /**
  * @brief Write `snapshot` in the file identified by `fd`
@@ -105,9 +111,9 @@ int _read_snapshot(abt_io_instance_id               abtio,
  * @param snap The snapshot to write to the file
  * @returns 0 on success, ABT_IO_PREAD_ERROR on failure.
  */
-int _write_snapshot(abt_io_instance_id               abtio,
-                    int                              fd,
-                    struct raft_snapshot*            snap);
+int _write_snapshot(abt_io_instance_id    abtio,
+                    int                   fd,
+                    struct raft_snapshot* snap);
 
 /**
  * @brief  Read the entry mapping at `offset`

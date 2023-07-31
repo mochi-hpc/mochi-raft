@@ -113,7 +113,7 @@ class Raft {
     mraft_log   m_raft_log;
     raft_io     m_raft_io;
     raft_tracer m_raft_tracer;
-    tracer_fn     m_tracer_fn;
+    tracer_fn   m_tracer_fn;
     raft        m_raft;
 
   public:
@@ -165,7 +165,8 @@ class Raft {
         ret = mraft_init(&m_raft, &m_raft_io, &m_raft_fsm, id, self_addr_str);
         MRAFT_CHECK_RET_AND_RAISE(ret, mraft_init);
 
-        raft_set_snapshot_threshold(&m_raft, 5);
+        raft_set_snapshot_threshold(&m_raft, 5U);
+        // raft_set_snapshot_trailing(&m_raft, 1U);
         m_raft.tracer = &m_raft_tracer;
     }
 
@@ -275,15 +276,12 @@ class Raft {
         return leader;
     }
 
-    void enable_tracer(bool enable) {
-        m_raft_tracer.enabled = enable;
-    }
+    void enable_tracer(bool enable) { m_raft_tracer.enabled = enable; }
 
-    void set_tracer(tracer_fn f) {
-        m_tracer_fn = std::move(f);
-    }
+    void set_tracer(tracer_fn f) { m_tracer_fn = std::move(f); }
 
-    void set_rpc_timeout(double timeout_ms) {
+    void set_rpc_timeout(double timeout_ms)
+    {
         mraft_io_set_rpc_timeout(&m_raft_io, timeout_ms);
     }
 
@@ -390,12 +388,12 @@ class Raft {
     }
 
     static void _tracer_emit(struct raft_tracer* tracer,
-                             const char* file,
-                             int line,
-                             const char* message)
+                             const char*         file,
+                             int                 line,
+                             const char*         message)
     {
         auto emit = static_cast<tracer_fn*>(tracer->impl);
-        if(emit && *emit) (*emit)(file, line, message);
+        if (emit && *emit) (*emit)(file, line, message);
     }
 };
 

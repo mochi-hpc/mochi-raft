@@ -31,24 +31,30 @@ int _abt_io_error_handler(abt_io_instance_id abtio, int fd, int error_code)
     return error_code;
 }
 
-#define DEFINE_METADATA_HANDLER(funcname, ABT_IO_MACRO)                    \
-    int _##funcname##_metadata(abt_io_instance_id abtio, int fd,           \
-                               raft_term* term, raft_id* voted_for,        \
-                               size_t* n_entries, size_t* n_entry_files)   \
-    {                                                                      \
-        if (term != NULL) ABT_IO_MACRO(abtio, fd, term, sizeof(*term), 0); \
-        if (voted_for != NULL)                                             \
-            ABT_IO_MACRO(abtio, fd, voted_for, sizeof(*voted_for),         \
-                         sizeof(*term));                                   \
-        if (n_entries != NULL)                                             \
-            ABT_IO_MACRO(abtio, fd, n_entries, sizeof(*n_entries),         \
-                         sizeof(*term) + sizeof(*voted_for));              \
-        if (n_entry_files != NULL)                                         \
-            ABT_IO_MACRO(abtio, fd, n_entry_files, sizeof(*n_entry_files), \
-                         sizeof(*term) + sizeof(*voted_for)                \
-                             + sizeof(*n_entries));                        \
-                                                                           \
-        return 0;                                                          \
+#define DEFINE_METADATA_HANDLER(funcname, ABT_IO_MACRO)                        \
+    int _##funcname##_metadata(abt_io_instance_id abtio, int fd,               \
+                               raft_term* term, raft_id* voted_for,            \
+                               size_t* current_entries,                        \
+                               size_t* deleted_entries, size_t* n_entry_files) \
+    {                                                                          \
+        if (term != NULL) ABT_IO_MACRO(abtio, fd, term, sizeof(*term), 0);     \
+        if (voted_for != NULL)                                                 \
+            ABT_IO_MACRO(abtio, fd, voted_for, sizeof(*voted_for),             \
+                         sizeof(*term));                                       \
+        if (current_entries != NULL)                                           \
+            ABT_IO_MACRO(abtio, fd, current_entries, sizeof(*current_entries), \
+                         sizeof(*term) + sizeof(*voted_for));                  \
+        if (deleted_entries != NULL)                                           \
+            ABT_IO_MACRO(abtio, fd, deleted_entries, sizeof(*deleted_entries), \
+                         sizeof(*term) + sizeof(*voted_for)                    \
+                             + sizeof(*current_entries));                      \
+        if (n_entry_files != NULL)                                             \
+            ABT_IO_MACRO(abtio, fd, n_entry_files, sizeof(*n_entry_files),     \
+                         sizeof(*term) + sizeof(*voted_for)                    \
+                             + sizeof(*current_entries)                        \
+                             + sizeof(*deleted_entries));                      \
+                                                                               \
+        return 0;                                                              \
     }
 
 DEFINE_METADATA_HANDLER(read, ABT_IO_PREAD)
