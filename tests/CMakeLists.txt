@@ -23,3 +23,9 @@ target_link_libraries (memory-log-generic-test PUBLIC mochi-raft thallium)
 
 add_executable (abt-io-log-generic-test abt-io-log-generic-test.cpp)
 target_link_libraries (abt-io-log-generic-test PUBLIC mochi-raft thallium)
+
+add_executable (memory-log-benchmark memory-log-benchmark.c)
+target_link_libraries (memory-log-benchmark PUBLIC mochi-raft PkgConfig::SSG MPI::MPI_C)
+
+add_executable (abt-io-log-benchmark abt-io-log-benchmark.c)
+target_link_libraries (abt-io-log-benchmark PUBLIC mochi-raft PkgConfig::SSG MPI::MPI_C)
