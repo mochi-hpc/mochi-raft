@@ -541,23 +541,6 @@ static int abt_io_write_default(struct abt_io_log* abtlog)
     snprintf(filename, FILENAME_LEN, "metadata-%020llu", abtlog->id);
     fd = abt_io_open(abtlog->aid, filename, O_CREAT | O_EXCL, mode);
     if (fd < 0) {
-        // static raft_term current_term    = 0;
-        // static raft_id   voted_for       = 0;
-        // static size_t    current_entries = 0;
-        // static size_t    deleted_entries = 0;
-        // static size_t    n_entry_files   = 1;
-        // ABT_IO_OPEN(abtlog->aid, filename, O_CREAT | O_WRONLY, &fd);
-        // _write_metadata(abtlog->aid, fd, &current_term, &voted_for,
-        //                 &current_entries, &deleted_entries, &n_entry_files);
-        // ABT_IO_CLOSE(abtlog->aid, fd);
-
-        // /* Persist that there are 0 entries in the first entry file */
-        // snprintf(filename, FILENAME_LEN, "entry-000-%020llu", abtlog->id);
-        // off_t filesize = sizeof(filesize);
-        // ABT_IO_OPEN(abtlog->aid, filename, O_CREAT | O_WRONLY, &fd);
-        // ABT_IO_PWRITE(abtlog->aid, fd, &filesize, sizeof(filesize), 0);
-        // ABT_IO_CLOSE(abtlog->aid, fd);
-
         /* The file already existed, meaning the process had already called
          * mraft_start, or even maybe had some entries, so we don't do anything,
          * we keep whatever data the process had stored before its crash */

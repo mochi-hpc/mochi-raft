@@ -15,12 +15,6 @@ extern "C" {
 #include <abt-io.h>
 
 /**
- * @brief Global temporary error handler, prints an error message and returns
- * the error code
- */
-int _abt_io_error_handler(abt_io_instance_id abtio, int fd, int error_code);
-
-/**
  * @brief Read from the metadata file identified by `fd`.
  * @param abtio ABT IO instance
  * @param fd The file descriptor of the metadata file

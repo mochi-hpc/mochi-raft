@@ -19,6 +19,13 @@ extern "C" {
 #define ABT_IO_ERROR_FTRUNCATE -4
 #define ABT_IO_ERROR_CLOSE     -5
 
+/**
+ * Prototype for abt-io macro error handler
+ * @brief Global temporary error handler, prints an error message and returns
+ * the error code
+ */
+int _abt_io_error_handler(abt_io_instance_id abtio, int fd, int error_code);
+
 #define ABT_IO_OPEN(abtio, filename, mode, fd)                           \
     do {                                                                 \
         *fd = abt_io_open(abtio, filename, mode, 0644);                  \
