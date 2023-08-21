@@ -11,7 +11,7 @@
 #include "abt-io-macros.h"
 #include "abt-io-log-helpers.h"
 
-#define FILENAME_LEN 40
+#define FILENAME_LEN 64
 
 #define ENTRY_FILE_MAX_SIZE (128 * 1024)
 
