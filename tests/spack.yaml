@@ -8,6 +8,7 @@ spack:
   - mochi-abt-io
   - json-c
   - mochi-ssg+mpi ^mpich
+  - mochi-thallium
   modules:
     prefix_inspections:
       lib: [LD_LIBRARY_PATH]
