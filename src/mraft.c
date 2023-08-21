@@ -43,6 +43,7 @@ int mraft_io_init(const struct mraft_io_init_args* args, struct raft_io* raft_io
     impl->mid  = args->mid;
     impl->pool = args->pool;
     impl->log  = args->log;
+    impl->provider_id = args->id;
     if (!impl->pool || impl->pool == ABT_POOL_NULL)
         margo_get_handler_pool(args->mid, &impl->pool);
 

@@ -8,6 +8,7 @@
 
 #include <mochi-raft.h>
 #include <mochi-raft-memory-log.h>
+#include <mochi-raft-abt-io-log.h>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -112,7 +113,7 @@ class Raft {
     mraft_log   m_raft_log;
     raft_io     m_raft_io;
     raft_tracer m_raft_tracer;
-    tracer_fn     m_tracer_fn;
+    tracer_fn   m_tracer_fn;
     raft        m_raft;
 
   public:
@@ -163,6 +164,9 @@ class Raft {
         MRAFT_CHECK_RET_AND_RAISE(ret, mraft_io_init);
         ret = mraft_init(&m_raft, &m_raft_io, &m_raft_fsm, id, self_addr_str);
         MRAFT_CHECK_RET_AND_RAISE(ret, mraft_init);
+
+        raft_set_snapshot_threshold(&m_raft, 5U);
+        // raft_set_snapshot_trailing(&m_raft, 1U);
         m_raft.tracer = &m_raft_tracer;
     }
 
@@ -268,19 +272,16 @@ class Raft {
         raft_leader(const_cast<raft*>(&m_raft), &leader_id, &leader_addr);
         std::string leader_addr_str((!leader_addr) ? "" : leader_addr);
         leader_addr_str.resize(256, '\0');
-        ServerInfo leader = {.id = leader_id, .address = leader_addr};
+        ServerInfo leader = {.id = leader_id, .address = leader_addr_str};
         return leader;
     }
 
-    void enable_tracer(bool enable) {
-        m_raft_tracer.enabled = enable;
-    }
+    void enable_tracer(bool enable) { m_raft_tracer.enabled = enable; }
 
-    void set_tracer(tracer_fn f) {
-        m_tracer_fn = std::move(f);
-    }
+    void set_tracer(tracer_fn f) { m_tracer_fn = std::move(f); }
 
-    void set_rpc_timeout(double timeout_ms) {
+    void set_rpc_timeout(double timeout_ms)
+    {
         mraft_io_set_rpc_timeout(&m_raft_io, timeout_ms);
     }
 
@@ -387,12 +388,12 @@ class Raft {
     }
 
     static void _tracer_emit(struct raft_tracer* tracer,
-                             const char* file,
-                             int line,
-                             const char* message)
+                             const char*         file,
+                             int                 line,
+                             const char*         message)
     {
         auto emit = static_cast<tracer_fn*>(tracer->impl);
-        if(emit && *emit) (*emit)(file, line, message);
+        if (emit && *emit) (*emit)(file, line, message);
     }
 };
 
@@ -463,6 +464,66 @@ class MemoryLog : public Log {
     }
 };
 
+class AbtIoLog : public Log {
+
+  private:
+    mraft_log m_log;
+
+  public:
+    AbtIoLog(raft_id raftId) { mraft_abt_io_log_init(&m_log, raftId); }
+
+    ~AbtIoLog() { mraft_abt_io_log_finalize(&m_log); }
+
+    void load(raft_term*             term,
+              raft_id*               id,
+              struct raft_snapshot** snap,
+              raft_index*            start_index,
+              struct raft_entry*     entries[],
+              size_t*                n_entries) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(load, term, id, snap, start_index, entries,
+                              n_entries);
+    }
+
+    void bootstrap(const struct raft_configuration* config) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(bootstrap, config);
+    }
+
+    void recover(const struct raft_configuration* config) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(recover, config);
+    }
+
+    void set_term(raft_term term) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(set_term, term);
+    }
+
+    void set_vote(raft_id id) override { MRAFT_WRAP_C_LOG_CALL(set_vote, id); }
+
+    void append(const struct raft_entry entries[], unsigned n_entries) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(append, entries, n_entries);
+    }
+
+    void truncate(raft_index index) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(truncate, index);
+    }
+
+    void snapshot_put(unsigned                    trailing,
+                      const struct raft_snapshot* snap) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(snapshot_put, trailing, snap);
+    }
+
+    void snapshot_get(struct raft_io_snapshot_get* req,
+                      raft_io_snapshot_get_cb      cb) override
+    {
+        MRAFT_WRAP_C_LOG_CALL(snapshot_get, req, cb);
+    }
+};
 } // namespace mraft
 
 #undef MRAFT_WRAP_CPP_LOG_CALL

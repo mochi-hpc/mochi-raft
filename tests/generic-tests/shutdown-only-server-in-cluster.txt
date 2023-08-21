@@ -1,0 +1,7 @@
+add 1
+sleep 2000
+apply HELLO_1_
+apply HELLO_2_
+sleep 1000
+shutdown 1
+sleep 2000
