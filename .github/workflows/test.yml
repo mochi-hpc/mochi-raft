@@ -42,6 +42,8 @@ jobs:
         spack --color always -e tests external find --not-buildable autoconf
         spack --color always -e tests external find --not-buildable automake
         spack --color always -e tests external find --not-buildable pkg-config
+        spack --color always -e tests external find --not-buildable coreutils
+        spack --color always -e tests external find --not-buildable gmake
 
     - name: Add mochi-spack-packages
       run: |
