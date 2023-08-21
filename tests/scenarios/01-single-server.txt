@@ -1,3 +1,5 @@
+# This scenario adds a single server then applies
+# a few entries.
 add 1
 sleep 2000
 apply HELLO_1_
