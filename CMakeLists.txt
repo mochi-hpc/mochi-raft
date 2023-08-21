@@ -2,8 +2,10 @@
 # See COPYRIGHT in top-level directory.
 cmake_minimum_required (VERSION 3.8)
 project (mochi-raft C CXX)
-enable_testing ()
 
+add_library (coverage_config INTERFACE)
+
+option (ENABLE_COVERAGE "Enable coverage reporting" OFF)
 option (ENABLE_TESTS    "Build tests" OFF)
 option (ENABLE_EXAMPLES "Build examples" OFF)
 option (ENABLE_SSG      "Build SSG support" OFF)
@@ -28,14 +30,26 @@ endif ()
 set (CMAKE_PREFIX_PATH "" CACHE STRING "External dependencies path")
 set (BUILD_SHARED_LIBS "ON" CACHE BOOL "Build a shared library")
 
+if (ENABLE_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options (coverage_config INTERFACE
+        -O0        # no optimization
+        -g         # generate debug info
+        --coverage # sets all required flags
+    )
+    if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.13)
+        target_link_options (coverage_config INTERFACE --coverage)
+    else ()
+        target_link_libraries (coverage_config INTERFACE --coverage)
+    endif ()
+endif ()
+
+
 find_package (PkgConfig REQUIRED)
 
 # search for margo
 pkg_check_modules (MARGO REQUIRED IMPORTED_TARGET margo)
 # search for c-raft
 pkg_check_modules (RAFT REQUIRED IMPORTED_TARGET raft)
-# search for uuid
-pkg_check_modules (UUID REQUIRED IMPORTED_TARGET uuid)
 # search for abt-io
 pkg_check_modules (ABTIO REQUIRED IMPORTED_TARGET abt-io)
 # search for json-c
@@ -45,6 +59,7 @@ if (ENABLE_SSG)
     # search for ssg
     pkg_check_modules (SSG REQUIRED IMPORTED_TARGET ssg)
     set (PC_REQUIRES ssg)
+    set (OPTIONAL_SSG PkgConfig::SSG)
 endif ()
 
 if (ENABLE_PYTHON)

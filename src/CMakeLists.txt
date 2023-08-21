@@ -22,12 +22,12 @@ set (mochi-raft-vers "${MRAFT_VERSION_MAJOR}.${MRAFT_VERSION_MINOR}")
 # server library
 add_library (mochi-raft ${src-files})
 target_link_libraries (mochi-raft
-    PkgConfig::MARGO
-    PkgConfig::ABTIO
-    PkgConfig::UUID
-    PkgConfig::JSONC
-    PkgConfig::SSG
-    PkgConfig::RAFT)
+    PUBLIC PkgConfig::MARGO
+           PkgConfig::ABTIO
+           PkgConfig::RAFT
+           ${OPTIONAL_SSG}
+           PkgConfig::JSONC
+    PRIVATE coverage_config)
 target_include_directories (mochi-raft PUBLIC $<INSTALL_INTERFACE:include>)
 target_include_directories (mochi-raft BEFORE PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
