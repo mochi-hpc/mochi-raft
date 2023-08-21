@@ -28,16 +28,34 @@ namespace tl = thallium;
     } while (0)
 
 namespace {
+
 class MyFSM : public mraft::StateMachine {
+
     friend class WorkerProvider;
 
-  private:
-    std::string content;
+    private:
+
+    raft_id           raftId;
+    margo_instance_id mid;
+    std::string       content;
+
+    template<typename Message, typename ... Args>
+    void trace(Message&& msg, Args&&... args) {
+        std::string fmt{"[fsm:%d] "};
+        fmt += std::forward<Message>(msg);
+        margo_trace(mid, fmt.c_str(), raftId, std::forward<Args>(args)...);
+    }
+
+    public:
+
+    MyFSM(margo_instance_id mid,
+          raft_id id)
+    : raftId(id)
+    , mid(mid) {}
 
     void apply(const struct raft_buffer* buf, void** result) override
     {
-        std::cerr << "[test] [debug] applying '"
-                  << static_cast<char*>(buf->base) << "'\n";
+        trace("applying \"%s\"", static_cast<char*>(buf->base));
         content.append(static_cast<char*>(buf->base));
     }
 
@@ -47,28 +65,34 @@ class MyFSM : public mraft::StateMachine {
         *n_bufs = 1;
         (*bufs)[0].base = strdup(content.c_str());
         (*bufs)[0].len  = content.size() + 1;
+        trace("snapshot, content=\"%s\"", content.c_str());
     }
 
     void restore(struct raft_buffer* buf) override
     {
-        std::cout << "[test] [debug] restoring\n";
         content.clear();
         if (!buf || !buf->len) return;
-        std::cout << "content='" << static_cast<char*>(buf->base) << "'\n";
         content.append(std::string(static_cast<char*>(buf->base)));
+        trace("restore, content=\"%s\"", content.c_str());
     }
 };
 
 class WorkerProvider : public tl::provider<WorkerProvider> {
-  public:
-    WorkerProvider(tl::engine& e, uint16_t provider_id)
-        : tl::provider<WorkerProvider>(e, 0), myfsm{}, abtlog{provider_id},
-          raft(e.get_margo_instance(), provider_id, myfsm, abtlog)
-    {
+
+    public:
+
+    WorkerProvider(tl::engine& e, raft_id id)
+    : tl::provider<WorkerProvider>(e, 0)
+    , myfsm{e.get_margo_instance(), id}
+    , abtlog{id}
+    , raft(e.get_margo_instance(), id, myfsm, abtlog)
+    , raftId(id) {
         // raft.enable_tracer(true);
-        raft.set_tracer([](const char* file, int line, const char* message) {
-            std::cerr << "[" << file << ":" << line << "] " << message
-                      << std::endl;
+        raft.set_tracer(
+            [this](const char* file, int line, const char* message) {
+                margo_trace(get_engine().get_margo_instance(),
+                            "[worker:%lu] [%s:%d] %s",
+                            raftId, file, line, message);
         });
 
 #define DEFINE_WORKER_RPC(__rpc__) define(#__rpc__, &WorkerProvider::__rpc__)
@@ -86,10 +110,12 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
 #undef DEFINE_WORKER_RPC
     }
 
-  private:
+    private:
+
     MyFSM           myfsm;
     mraft::AbtIoLog abtlog;
     mraft::Raft     raft;
+    raft_id         raftId;
 
 #define MRAFT_WRAP_CPP_CALL(func, ...)             \
     do {                                           \
@@ -132,7 +158,7 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
     mraft::ServerInfo get_leader(void) const
     {
         margo_trace(get_engine().get_margo_instance(),
-                    "[worker] received get_leader");
+                    "[worker:%lu] received get_leader", raftId);
         mraft::ServerInfo leaderInfo;
         try {
             leaderInfo = raft.get_leader();
@@ -143,7 +169,7 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
             };
         }
         margo_trace(get_engine().get_margo_instance(),
-                    "[worker] completed get_leader");
+                    "[worker:%lu] completed get_leader", raftId);
         return leaderInfo;
     }
 
@@ -155,15 +181,16 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
     int shutdown(void) const
     {
         margo_trace(get_engine().get_margo_instance(),
-                    "[worker] received shutdown");
+                    "[worker:%lu] received shutdown", raftId);
         try {
             get_engine().finalize();
         } catch (thallium::exception& ex) {
-            std::cerr << ex.what() << "\n";
+            margo_error(get_engine().get_margo_instance(),
+                        "[worker:%lu] %s", ex.what());
             return 1;
         }
         margo_trace(get_engine().get_margo_instance(),
-                    "[worker] completed shutdown");
+                    "[worker:%lu] completed shutdown", raftId);
         return 0;
     }
 
@@ -173,7 +200,8 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
             get_engine().get_progress_pool().make_thread(
                 [timeout_ms]() { sleep(timeout_ms); }, tl::anonymous{});
         } catch (thallium::exception& ex) {
-            std::cerr << ex.what() << "\n";
+            margo_critical(get_engine().get_margo_instance(),
+                           "[worker:%lu] %s", raftId, ex.what());
             return 1;
         }
         return 0;
@@ -185,7 +213,9 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
 };
 
 class Master {
-  public:
+
+    public:
+
     Master(tl::engine& e) : engine(e)
     {
 #define DEFINE_MASTER_RPC(__rpc__) \
@@ -213,12 +243,15 @@ class Master {
 
     void readInput(std::istream& input)
     {
-        std::cout << "==================================================\n";
         // Read from input stream until EOF
         std::string line;
         while (std::getline(input, line)) {
-            margo_trace(engine.get_margo_instance(), "[master] read line: '%s'",
-                        line.c_str());
+            if (line.empty() || line[0] == '#')
+                continue;
+            margo_trace(engine.get_margo_instance(),
+                        "==================================================");
+            margo_trace(engine.get_margo_instance(),
+                        "[master] read line: \"%s\"", line.c_str());
             std::istringstream iss(line);
             std::string        command;
             iss >> command;
@@ -253,16 +286,19 @@ class Master {
                 iss >> raftId >> timeout_ms;
                 suspendWorker(raftId, timeout_ms);
             } else {
-                std::cerr << "[master] unrecognized command in line: '" << line
-                          << "'... ingoring line\n";
+                margo_trace(engine.get_margo_instance(),
+                            "[master] ignoring unrecognized command \"%s\"",
+                            command.c_str());
             }
-            std::cout << "==================================================\n";
         }
+        margo_trace(engine.get_margo_instance(),
+                    "==================================================");
         margo_trace(engine.get_margo_instance(),
                     "[master] finished reading input stream");
     }
 
-  private:
+    private:
+
     tl::engine                                  engine;
     std::map<std::string, tl::remote_procedure> rpcs;
     std::set<raft_id>                           seenRaftIds;
@@ -292,10 +328,6 @@ class Master {
             margo_critical(engine.get_margo_instance(), "failed forking child");
             std::exit(1);
         } else if (pid == 0) {
-            // Worker (child) process
-            margo_trace(engine.get_margo_instance(),
-                        "[worker] spawned with PID: %d", getpid());
-
             // Close the read end of the pipe
             close(pipeFd[0]);
 
@@ -304,7 +336,8 @@ class Master {
             engine.finalize();
 
             // The child creates its own engine
-            engine = tl::engine("tcp", THALLIUM_SERVER_MODE);
+            engine = tl::engine("ofi+tcp;ofi_rxm", THALLIUM_SERVER_MODE);
+            margo_set_log_level(engine.get_margo_instance(), MARGO_LOG_TRACE);
 
             // Get the self_addr and resize it to size 256 with '\0'
             std::string self_addr = engine.self();
@@ -312,23 +345,20 @@ class Master {
 
             // Create provider
             WorkerProvider* provider = new WorkerProvider(engine, raftId);
-            auto            finalize_callback = [provider, raftId]() mutable {
-                std::cout << "inside finalize_callback of raftId=" << raftId
-                          << "\n";
+            engine.push_finalize_callback([provider]() {
                 delete provider;
-                provider = nullptr;
-            };
-            engine.push_finalize_callback(finalize_callback);
+            });
 
             // Send self_addr to master
             ssize_t _ = write(pipeFd[1], self_addr.c_str(), self_addr.size());
             close(pipeFd[1]);
             margo_trace(engine.get_margo_instance(),
-                        "[worker] wrote self address to pipe: %s",
-                        self_addr.c_str());
+                        "[worker:%lu] wrote self address to pipe: %s",
+                        raftId, self_addr.c_str());
 
             engine.wait_for_finalize();
             std::exit(0);
+
         } else if (pid > 0) {
             // Master (parent) process
             // Close the write end of the pipe
@@ -360,7 +390,8 @@ class Master {
                 try {
                     ret = rpcs["bootstrap"].on(handle)(servers);
                 } catch (const thallium::margo_exception& e) {
-                    std::cerr << e.what() << std::endl;
+                    margo_error(engine.get_margo_instance(),
+                                "[master] %s", e.what());
                 }
                 margo_assert(engine.get_margo_instance(), ret == 0);
             }
@@ -373,7 +404,8 @@ class Master {
             try {
                 ret = rpcs["start"].on(handle)();
             } catch (const thallium::margo_exception& e) {
-                std::cerr << e.what() << std::endl;
+                margo_error(engine.get_margo_instance(),
+                            "[master] %s", e.what());
             }
             margo_assert(engine.get_margo_instance(), ret == 0);
 
@@ -397,7 +429,8 @@ class Master {
                 try {
                     ret = rpcs["add"].on(handle)(raftId, workerAddrStr);
                 } catch (const thallium::margo_exception& e) {
-                    std::cerr << e.what() << std::endl;
+                    margo_error(engine.get_margo_instance(),
+                                "[master] %s", e.what());
                 }
                 margo_assert(engine.get_margo_instance(), ret == 0);
 
@@ -410,7 +443,8 @@ class Master {
                 try {
                     ret = rpcs["assign"].on(handle)(raftId, role);
                 } catch (const thallium::margo_exception& e) {
-                    std::cerr << e.what() << std::endl;
+                    margo_error(engine.get_margo_instance(),
+                                "[master] %s", e.what());
                 }
                 margo_assert(engine.get_margo_instance(), ret == 0);
             }
@@ -451,7 +485,8 @@ end:
             try {
                 ret = rpcs["transfer"].on(handle)(transferToId);
             } catch (const thallium::margo_exception& e) {
-                std::cerr << e.what() << std::endl;
+                margo_error(engine.get_margo_instance(),
+                            "[master] %s", e.what());
             }
             margo_assert(engine.get_margo_instance(), ret == 0);
         }
@@ -466,7 +501,8 @@ end:
         try {
             ret = rpcs["remove"].on(handle)(raftId);
         } catch (const thallium::margo_exception& e) {
-            std::cerr << e.what() << std::endl;
+            margo_error(engine.get_margo_instance(),
+                        "[master] %s", e.what());
         }
         margo_assert(engine.get_margo_instance(), ret == 0);
 
@@ -478,7 +514,8 @@ end:
         try {
             ret = rpcs["shutdown"].on(handle)();
         } catch (const thallium::margo_exception& e) {
-            std::cerr << e.what() << std::endl;
+            margo_error(engine.get_margo_instance(),
+                        "[master] %s", e.what());
         }
         margo_assert(engine.get_margo_instance(), ret == 0);
 
@@ -501,15 +538,16 @@ end:
             ret = rpcs["shutdown"].on(handle)();
             for (const auto& pair : pidToRaftId) {
                 if (pair.second == raftId) {
-                    std::cout << "[test] [debug] waiting on PID=" << pair.first
-                              << "\n";
+                    margo_trace(engine.get_margo_instance(),
+                                "[master] waiting on PID=%d", pair.first);
                     waitpid(pair.first, NULL, 0);
-                    std::cout << "[test] [debug] finished waiting on PID="
-                              << pair.first << "\n";
+                    margo_trace(engine.get_margo_instance(),
+                                "[master] done waiting on PID=%d", pair.first);
                 }
             }
         } catch (const thallium::margo_exception& e) {
-            std::cerr << e.what() << std::endl;
+            margo_error(engine.get_margo_instance(),
+                        "[master] %s", e.what());
         }
         margo_assert(engine.get_margo_instance(), ret == 0);
 
@@ -644,7 +682,8 @@ end:
         try {
             ret = rpcs["apply"].on(handle)(data);
         } catch (const thallium::margo_exception& e) {
-            std::cerr << e.what() << std::endl;
+            margo_error(engine.get_margo_instance(),
+                        "[master] %s", e.what());
         }
         margo_assert(engine.get_margo_instance(), ret == 0);
     }
@@ -661,7 +700,8 @@ end:
         try {
             ret = rpcs["suspend"].on(handle)(timeout_ms);
         } catch (const thallium::margo_exception& e) {
-            std::cerr << e.what() << std::endl;
+            margo_error(engine.get_margo_instance(),
+                        "[master] %s", e.what());
         }
         margo_assert(engine.get_margo_instance(), ret == 0);
     }
@@ -695,7 +735,8 @@ end:
             } catch (const thallium::exception& e) {
                 margo_trace(engine.get_margo_instance(),
                             "[master] getLeader request threw exception...");
-                std::cerr << e.what() << std::endl;
+                margo_error(engine.get_margo_instance(),
+                            "[master] %s", e.what());
             }
         }
         return -1;
@@ -738,12 +779,19 @@ int parseCommandLineArgs(int argc, char* argv[], char** filename)
 
 int main(int argc, char* argv[])
 {
-    tl::engine engine("tcp", THALLIUM_SERVER_MODE);
+    tl::engine engine("ofi+tcp;ofi_rxm", THALLIUM_SERVER_MODE);
     margo_set_log_level(engine.get_margo_instance(), MARGO_LOG_TRACE);
 
     // Parse command-line arguments
     char* filename = nullptr;
     parseCommandLineArgs(argc, argv, &filename);
+    if(filename) {
+        margo_trace(engine.get_margo_instance(),
+                    "[master] Reading from file %s", filename);
+    } else {
+        margo_trace(engine.get_margo_instance(),
+                    "[master] Reading from stdin");
+    }
     std::ifstream inputFile;
     std::istream* input
         = (!filename) ? &std::cin : (inputFile.open(filename), &inputFile);

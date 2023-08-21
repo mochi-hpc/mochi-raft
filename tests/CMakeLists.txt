@@ -23,3 +23,12 @@ target_link_libraries (memory-log-generic-test PUBLIC mochi-raft thallium)
 
 add_executable (abt-io-log-generic-test abt-io-log-generic-test.cpp)
 target_link_libraries (abt-io-log-generic-test PUBLIC mochi-raft thallium)
+
+file (GLOB scenarios ${CMAKE_CURRENT_SOURCE_DIR}/scenarios/*.txt)
+foreach (scenario ${scenarios})
+    get_filename_component (test-name ${scenario} NAME_WE)
+    message (STATUS "Found test scenario: ${test-name}")
+    add_test (NAME ${test-name}
+              COMMAND timeout 600 ${CMAKE_CURRENT_BINARY_DIR}/abt-io-log-generic-test -f ${scenario})
+endforeach ()
+add_custom_target (check COMMAND ${CMAKE_CTEST_COMMAND} DEPENDS ${scenarios} abt-io-log-generic-test)

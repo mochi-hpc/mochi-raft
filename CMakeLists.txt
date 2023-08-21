@@ -2,6 +2,7 @@
 # See COPYRIGHT in top-level directory.
 cmake_minimum_required (VERSION 3.8)
 project (mochi-raft C CXX)
+enable_testing ()
 
 add_library (coverage_config INTERFACE)
 

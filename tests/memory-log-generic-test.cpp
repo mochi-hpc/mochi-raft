@@ -15,6 +15,8 @@
 
 namespace tl = thallium;
 
+static int worker_id = 0;
+
 #define margo_assert(__mid__, __expr__)                                      \
     do {                                                                     \
         if (!(__expr__)) {                                                   \
@@ -27,7 +29,7 @@ namespace tl = thallium;
 
 #define worker_trace(__message__)                                \
     do {                                                         \
-        std::cerr << "[trace] [worker] " << __message__ << "\n"; \
+        std::cerr << "[trace] [worker:" << worker_id << "] " << __message__ << "\n"; \
     } while (0)
 
 #define master_trace(__message__)                                \
@@ -291,7 +293,7 @@ class Master {
             engine.finalize();
 
             // The child creates its own engine
-            engine = tl::engine("tcp", THALLIUM_SERVER_MODE);
+            engine = tl::engine("ofi+tcp;ofi_rxm", THALLIUM_SERVER_MODE);
 
             // Get the self_addr and resize it to size 256 with '\0'
             std::string self_addr = engine.self();
@@ -561,7 +563,7 @@ int parseCommandLineArgs(int argc, char* argv[], char** filename)
 
 int main(int argc, char* argv[])
 {
-    tl::engine engine("tcp", THALLIUM_SERVER_MODE);
+    tl::engine engine("ofi+tcp;ofi_rxm", THALLIUM_SERVER_MODE);
 
     // Parse command-line arguments
     char* filename = nullptr;
