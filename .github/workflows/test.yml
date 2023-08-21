@@ -54,7 +54,7 @@ jobs:
 
     - name: Create cache key from environment file
       run: |
-        jq --sort-keys 'del(.spack.commit) | del(.roots)' ./spack.lock > key.json
+        jq --sort-keys 'del(.spack.commit) | del(.roots)' tests/spack.lock > key.json
 
     - name: Restore Spack cache
       uses: actions/cache@v2
