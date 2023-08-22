@@ -181,6 +181,10 @@ class Raft {
     Raft& operator=(const Raft&) = delete;
     Raft& operator=(Raft&&)      = delete;
 
+    void set_heartbeat_timeout(unsigned msecs) {
+        raft_set_heartbeat_timeout(&m_raft, msecs);
+    }
+
     template <typename ServerInfoContainer>
     void bootstrap(const ServerInfoContainer& serverList)
     {

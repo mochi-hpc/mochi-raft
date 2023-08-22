@@ -43,7 +43,7 @@ class MyFSM : public mraft::StateMachine {
     void trace(Message&& msg, Args&&... args) {
         std::string fmt{"[fsm:%d] "};
         fmt += std::forward<Message>(msg);
-        margo_trace(mid, fmt.c_str(), raftId, std::forward<Args>(args)...);
+        margo_info(mid, fmt.c_str(), raftId, std::forward<Args>(args)...);
     }
 
     public:
@@ -90,10 +90,11 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
         // raft.enable_tracer(true);
         raft.set_tracer(
             [this](const char* file, int line, const char* message) {
-                margo_trace(get_engine().get_margo_instance(),
+                margo_debug(get_engine().get_margo_instance(),
                             "[worker:%lu] [%s:%d] %s",
                             raftId, file, line, message);
         });
+        raft.set_heartbeat_timeout(500);
 
 #define DEFINE_WORKER_RPC(__rpc__) define(#__rpc__, &WorkerProvider::__rpc__)
         DEFINE_WORKER_RPC(start);
@@ -157,7 +158,7 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
 
     mraft::ServerInfo get_leader(void) const
     {
-        margo_trace(get_engine().get_margo_instance(),
+        margo_debug(get_engine().get_margo_instance(),
                     "[worker:%lu] received get_leader", raftId);
         mraft::ServerInfo leaderInfo;
         try {
@@ -168,7 +169,7 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
                 .address = std::string(""),
             };
         }
-        margo_trace(get_engine().get_margo_instance(),
+        margo_debug(get_engine().get_margo_instance(),
                     "[worker:%lu] completed get_leader", raftId);
         return leaderInfo;
     }
@@ -180,7 +181,7 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
 
     int shutdown(void) const
     {
-        margo_trace(get_engine().get_margo_instance(),
+        margo_debug(get_engine().get_margo_instance(),
                     "[worker:%lu] received shutdown", raftId);
         try {
             get_engine().finalize();
@@ -189,7 +190,7 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
                         "[worker:%lu] %s", ex.what());
             return 1;
         }
-        margo_trace(get_engine().get_margo_instance(),
+        margo_debug(get_engine().get_margo_instance(),
                     "[worker:%lu] completed shutdown", raftId);
         return 0;
     }
@@ -248,9 +249,9 @@ class Master {
         while (std::getline(input, line)) {
             if (line.empty() || line[0] == '#')
                 continue;
-            margo_trace(engine.get_margo_instance(),
+            margo_debug(engine.get_margo_instance(),
                         "==================================================");
-            margo_trace(engine.get_margo_instance(),
+            margo_debug(engine.get_margo_instance(),
                         "[master] read line: \"%s\"", line.c_str());
             std::istringstream iss(line);
             std::string        command;
@@ -286,14 +287,14 @@ class Master {
                 iss >> raftId >> timeout_ms;
                 suspendWorker(raftId, timeout_ms);
             } else {
-                margo_trace(engine.get_margo_instance(),
+                margo_debug(engine.get_margo_instance(),
                             "[master] ignoring unrecognized command \"%s\"",
                             command.c_str());
             }
         }
-        margo_trace(engine.get_margo_instance(),
+        margo_debug(engine.get_margo_instance(),
                     "==================================================");
-        margo_trace(engine.get_margo_instance(),
+        margo_debug(engine.get_margo_instance(),
                     "[master] finished reading input stream");
     }
 
@@ -337,7 +338,7 @@ class Master {
 
             // The child creates its own engine
             engine = tl::engine("ofi+tcp;ofi_rxm", THALLIUM_SERVER_MODE);
-            margo_set_log_level(engine.get_margo_instance(), MARGO_LOG_TRACE);
+            margo_set_log_level(engine.get_margo_instance(), MARGO_LOG_DEBUG);
 
             // Get the self_addr and resize it to size 256 with '\0'
             std::string self_addr = engine.self();
@@ -352,7 +353,7 @@ class Master {
             // Send self_addr to master
             ssize_t _ = write(pipeFd[1], self_addr.c_str(), self_addr.size());
             close(pipeFd[1]);
-            margo_trace(engine.get_margo_instance(),
+            margo_debug(engine.get_margo_instance(),
                         "[worker:%lu] wrote self address to pipe: %s",
                         raftId, self_addr.c_str());
 
@@ -369,7 +370,7 @@ class Master {
             close(pipeFd[0]);
             std::string workerAddrStr(workerAddrPtr);
             workerAddrStr.resize(256, '\0');
-            margo_trace(engine.get_margo_instance(),
+            margo_debug(engine.get_margo_instance(),
                         "[master] read address from pipe: %s", workerAddrPtr);
 
             // Get handle for the spawned worker to make RPC requests to worker
@@ -378,7 +379,7 @@ class Master {
             // If its the first spawned worker, send it an RPC requesting to
             // bootstrap the raft cluster
             if (cluster.size() == 0) {
-                margo_trace(engine.get_margo_instance(),
+                margo_debug(engine.get_margo_instance(),
                             "[master] requesting bootstrap RPC to worker: "
                             "id=%llu, address=%s",
                             raftId, workerAddrPtr);
@@ -397,7 +398,7 @@ class Master {
             }
 
             // Send RPC requesting the spawned worked to call mraft_start
-            margo_trace(engine.get_margo_instance(),
+            margo_debug(engine.get_margo_instance(),
                         "[master] requesting start RPC to worker: "
                         "id=%llu, address=%s",
                         raftId, workerAddrPtr);
@@ -418,13 +419,13 @@ class Master {
                 mraft::ServerInfo leader;
                 ret = getLeaderInfo(leader, handle);
                 margo_assert(engine.get_margo_instance(), ret == 0);
-                margo_trace(
+                margo_debug(
                     engine.get_margo_instance(),
                     "[master] found leader of cluster: id=%llu, address=%s",
                     leader.id, leader.address.c_str());
 
                 // Request add RPC to leader
-                margo_trace(engine.get_margo_instance(),
+                margo_debug(engine.get_margo_instance(),
                             "[master] requesting start RPC to leader");
                 try {
                     ret = rpcs["add"].on(handle)(raftId, workerAddrStr);
@@ -436,7 +437,7 @@ class Master {
 
                 // Request assign RPC to leader
                 const auto role = mraft::Role::VOTER;
-                margo_trace(engine.get_margo_instance(),
+                margo_debug(engine.get_margo_instance(),
                             "requesting assign RPC to leader: assigning "
                             "id=%llu to role=%i",
                             raftId, static_cast<int>(role));
@@ -465,7 +466,7 @@ end:
 
         // If the worker is the leader, it must first transfer leadership
         if (leader.id == raftId) {
-            margo_trace(engine.get_margo_instance(),
+            margo_debug(engine.get_margo_instance(),
                         "[master] leadership needs to be transfered before "
                         "removal of id: %llu",
                         raftId);
@@ -478,7 +479,7 @@ end:
                 }
             }
 
-            margo_trace(
+            margo_debug(
                 engine.get_margo_instance(),
                 "[master] requesting transfer RPC from id=%llu to id=%llu",
                 raftId, transferToId);
@@ -494,7 +495,7 @@ end:
         // Request the worker to remove itself from the cluster
         std::string workerAddr = cluster[raftId];
         handle = tl::provider_handle(engine.lookup(workerAddr), 0);
-        margo_trace(
+        margo_debug(
             engine.get_margo_instance(),
             "[master] requesting remove RPC to worker: id=%llu, address=%s",
             raftId, workerAddr.c_str());
@@ -507,7 +508,7 @@ end:
         margo_assert(engine.get_margo_instance(), ret == 0);
 
         // Request worker to remove the shutdown process from the cluster
-        margo_trace(
+        margo_debug(
             engine.get_margo_instance(),
             "[master] requesting shutdown RPC to worker: id=%llu, address=%s",
             raftId, workerAddr.c_str());
@@ -530,7 +531,7 @@ end:
         tl::provider_handle handle
             = tl::provider_handle(engine.lookup(workerAddr), 0);
 
-        margo_trace(
+        margo_debug(
             engine.get_margo_instance(),
             "[master] requesting shutdown RPC to worker: id=%llu, address=%s",
             raftId, workerAddr.c_str());
@@ -538,10 +539,10 @@ end:
             ret = rpcs["shutdown"].on(handle)();
             for (const auto& pair : pidToRaftId) {
                 if (pair.second == raftId) {
-                    margo_trace(engine.get_margo_instance(),
+                    margo_debug(engine.get_margo_instance(),
                                 "[master] waiting on PID=%d", pair.first);
                     waitpid(pair.first, NULL, 0);
-                    margo_trace(engine.get_margo_instance(),
+                    margo_debug(engine.get_margo_instance(),
                                 "[master] done waiting on PID=%d", pair.first);
                 }
             }
@@ -561,19 +562,19 @@ end:
             mraft::ServerInfo leader;
             ret = getLeaderInfo(leader, handle);
             // margo_assert(engine.get_margo_instance(), ret == 0);
-            margo_trace(engine.get_margo_instance(),
+            margo_debug(engine.get_margo_instance(),
                         "[master] found leader of cluster: id=%llu, address=%s",
                         leader.id, leader.address.c_str());
             if (ret != 0) {
                 if (cluster.size() == 1)
                     break;
-                margo_trace(engine.get_margo_instance(),
+                margo_debug(engine.get_margo_instance(),
                             "[master] no leader found... trying again");
                 margo_thread_sleep(engine.get_margo_instance(), 2000);
                 continue;
             }
 
-            margo_trace(
+            margo_debug(
                 engine.get_margo_instance(),
                 "[master] requesting remove RPC to leader: remove id=%llu",
                 raftId);
@@ -594,7 +595,7 @@ end:
                 margo_assert(engine.get_margo_instance(), ret == 0);
                 break;
             } catch (thallium::timeout& e) {
-                margo_trace(
+                margo_debug(
                     engine.get_margo_instance(),
                     "[master] timeout on remove RPC to id=%llu, address=%s",
                     leader.id, leader.address.c_str());
@@ -626,11 +627,11 @@ end:
             tl::provider_handle handle;
             ret = getLeaderInfo(leader, handle);
             margo_assert(engine.get_margo_instance(), ret == 0);
-            margo_trace(engine.get_margo_instance(),
+            margo_debug(engine.get_margo_instance(),
                         "[master] found leader of cluster: id=%llu, address=%s",
                         leader.id, leader.address.c_str());
 
-            margo_trace(
+            margo_debug(
                 engine.get_margo_instance(),
                 "[master] requesting remove RPC to leader: remove id=%llu",
                 killedWorkerRaftId);
@@ -651,7 +652,7 @@ end:
                 margo_assert(engine.get_margo_instance(), ret == 0);
                 break;
             } catch (thallium::timeout& e) {
-                margo_trace(
+                margo_debug(
                     engine.get_margo_instance(),
                     "[master] timeout on remove RPC to id=%llu, address=%s",
                     leader.id, leader.address.c_str());
@@ -672,11 +673,11 @@ end:
         tl::provider_handle handle;
         ret = getLeaderInfo(leader, handle);
         margo_assert(engine.get_margo_instance(), ret == 0);
-        margo_trace(engine.get_margo_instance(),
+        margo_debug(engine.get_margo_instance(),
                     "[master] found leader of cluster: id=%llu, address=%s",
                     leader.id, leader.address.c_str());
 
-        margo_trace(engine.get_margo_instance(),
+        margo_debug(engine.get_margo_instance(),
                     "[master] requesting apply RPC to leader: apply data='%s'",
                     data.c_str());
         try {
@@ -693,7 +694,7 @@ end:
         int                 ret;
         std::string         workerAddr = cluster[raftId];
         tl::provider_handle handle(engine.lookup(workerAddr), 0);
-        margo_trace(
+        margo_debug(
             engine.get_margo_instance(),
             "[master] requesting suspend RPC to worker id=%llu: timeout_ms=%lf",
             raftId, timeout_ms);
@@ -709,7 +710,7 @@ end:
     int getLeaderInfo(mraft::ServerInfo& leader, tl::provider_handle& handle)
     {
         for (auto it = cluster.cbegin(); it != cluster.cend(); it++) {
-            margo_trace(engine.get_margo_instance(),
+            margo_debug(engine.get_margo_instance(),
                         "[master] requesting get_leader RPC to worker: "
                         "id=%llu, address=%s",
                         it->first, it->second.c_str());
@@ -728,12 +729,12 @@ end:
                     = rpcs["get_leader"].on(handle).timed(current_timeout_ms);
                 if (leader.id != 0) return 0;
             } catch (thallium::timeout& e) {
-                margo_trace(
+                margo_debug(
                     engine.get_margo_instance(),
                     "[master] timeout on get_leader RPC to id=%llu, address=%s",
                     it->first, it->second.c_str());
             } catch (const thallium::exception& e) {
-                margo_trace(engine.get_margo_instance(),
+                margo_debug(engine.get_margo_instance(),
                             "[master] getLeader request threw exception...");
                 margo_error(engine.get_margo_instance(),
                             "[master] %s", e.what());
@@ -780,16 +781,16 @@ int parseCommandLineArgs(int argc, char* argv[], char** filename)
 int main(int argc, char* argv[])
 {
     tl::engine engine("ofi+tcp;ofi_rxm", THALLIUM_SERVER_MODE);
-    margo_set_log_level(engine.get_margo_instance(), MARGO_LOG_TRACE);
+    margo_set_log_level(engine.get_margo_instance(), MARGO_LOG_DEBUG);
 
     // Parse command-line arguments
     char* filename = nullptr;
     parseCommandLineArgs(argc, argv, &filename);
     if(filename) {
-        margo_trace(engine.get_margo_instance(),
+        margo_debug(engine.get_margo_instance(),
                     "[master] Reading from file %s", filename);
     } else {
-        margo_trace(engine.get_margo_instance(),
+        margo_debug(engine.get_margo_instance(),
                     "[master] Reading from stdin");
     }
     std::ifstream inputFile;
@@ -798,9 +799,9 @@ int main(int argc, char* argv[])
 
     Master master(engine);
 
-    margo_trace(engine.get_margo_instance(), "[master] reading input stream");
+    margo_debug(engine.get_margo_instance(), "[master] reading input stream");
     master.readInput(*input);
 
-    margo_trace(engine.get_margo_instance(), "[master] exiting program");
+    margo_debug(engine.get_margo_instance(), "[master] exiting program");
     return 0;
 }
