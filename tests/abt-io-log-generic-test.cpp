@@ -107,6 +107,7 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
         DEFINE_WORKER_RPC(transfer);
         DEFINE_WORKER_RPC(shutdown);
         DEFINE_WORKER_RPC(suspend);
+        DEFINE_WORKER_RPC(terminate);
         DEFINE_WORKER_RPC(get_fsm_content);
 #undef DEFINE_WORKER_RPC
     }
@@ -154,6 +155,12 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
             .len  = buffer.size() + 1, // Include '\0'
         };
         MRAFT_WRAP_CPP_CALL(apply, &bufs, 1U);
+    }
+
+    int terminate()
+    {
+        get_engine().finalize();
+        return 0;
     }
 
     mraft::ServerInfo get_leader(void) const
@@ -230,6 +237,7 @@ class Master {
         DEFINE_MASTER_RPC(transfer);
         DEFINE_MASTER_RPC(shutdown);
         DEFINE_MASTER_RPC(suspend);
+        DEFINE_MASTER_RPC(terminate);
         DEFINE_MASTER_RPC(get_leader);
         DEFINE_MASTER_RPC(get_fsm_content);
 #undef DEFINE_MASTER_RPC
@@ -238,7 +246,14 @@ class Master {
     ~Master()
     {
         // Request to all workers to shutdown
-        while (!cluster.empty()) shutdownWorker(cluster.cbegin()->first);
+        //while (!cluster.empty()) shutdownWorker(cluster.cbegin()->first);
+        for(auto& p : cluster) {
+            auto& addr = p.second;
+            auto ep = engine.lookup(addr);
+            auto ph = tl::provider_handle{ep, 0};
+            rpcs["terminate"].on(ph)();
+            waitpid(p.first, NULL, 0);
+        }
         engine.finalize();
     }
 
@@ -581,7 +596,7 @@ end:
 
             const auto start_time = std::chrono::steady_clock::now();
             const auto end_time
-                = start_time + std::chrono::duration<double, std::milli>(500);
+                = start_time + std::chrono::duration<double, std::milli>(5000);
 
             const auto current_timeout_ms
                 = std::chrono::duration<double, std::micro>(

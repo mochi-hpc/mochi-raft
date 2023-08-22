@@ -3,6 +3,7 @@
 add 1
 sleep 2000
 add 2
+sleep 2000
 add 3
 sleep 2000
 apply HELLO_1_
