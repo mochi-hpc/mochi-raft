@@ -116,7 +116,7 @@ int main(int argc, char** argv)
 
     /* Initialize the log */
     struct mraft_log log;
-    mraft_abt_io_log_init(&log, (raft_id)self_id);
+    mraft_abt_io_log_init(&log, (raft_id)self_id, NULL);
 
     /* Initialize raft_io backend */
     struct mraft_io_init_args mraft_io_init_args

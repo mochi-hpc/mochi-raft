@@ -470,7 +470,15 @@ class AbtIoLog : public Log {
     mraft_log m_log;
 
   public:
-    AbtIoLog(raft_id raftId) { mraft_abt_io_log_init(&m_log, raftId); }
+    AbtIoLog(raft_id raftId,
+             abt_io_instance_id aid = ABT_IO_INSTANCE_NULL,
+             const char* config = nullptr,
+             margo_instance_id mid = MARGO_INSTANCE_NULL) {
+        mraft_abt_io_log_args args = {
+            config, aid, mid
+        };
+        mraft_abt_io_log_init(&m_log, raftId, &args);
+    }
 
     ~AbtIoLog() { mraft_abt_io_log_finalize(&m_log); }
 
