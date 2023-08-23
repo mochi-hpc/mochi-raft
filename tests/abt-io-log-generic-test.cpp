@@ -81,10 +81,10 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
 
     public:
 
-    WorkerProvider(tl::engine& e, raft_id id)
+    WorkerProvider(tl::engine& e, raft_id id, std::string config)
     : tl::provider<WorkerProvider>(e, 0)
     , myfsm{e.get_margo_instance(), id}
-    , abtlog{id}
+    , abtlog{id, ABT_IO_INSTANCE_NULL, config.c_str(), e.get_margo_instance()}
     , raft(e.get_margo_instance(), id, myfsm, abtlog)
     , raftId(id) {
         // raft.enable_tracer(true);
@@ -224,7 +224,9 @@ class Master {
 
     public:
 
-    Master(tl::engine& e) : engine(e)
+    Master(tl::engine& e, std::string path)
+    : engine(e)
+    , path(std::move(path))
     {
 #define DEFINE_MASTER_RPC(__rpc__) \
     rpcs.insert(std::make_pair(#__rpc__, engine.define(#__rpc__)))
@@ -316,6 +318,7 @@ class Master {
     private:
 
     tl::engine                                  engine;
+    std::string                                 path;
     std::map<std::string, tl::remote_procedure> rpcs;
     std::set<raft_id>                           seenRaftIds;
     std::map<raft_id, std::string>              cluster;
@@ -331,6 +334,9 @@ class Master {
         int  ret;
         int  pipeFd[2]; // Pipe for worker to communicate self_addr to master
         char workerAddrPtr[256];
+
+        std::stringstream config;
+        config << "{\"path\":\"" << path << "\"}";
 
         if (pipe(pipeFd) == -1) {
             margo_critical(engine.get_margo_instance(),
@@ -360,7 +366,7 @@ class Master {
             self_addr.resize(256, '\0');
 
             // Create provider
-            WorkerProvider* provider = new WorkerProvider(engine, raftId);
+            WorkerProvider* provider = new WorkerProvider(engine, raftId, config.str());
             engine.push_finalize_callback([provider]() {
                 delete provider;
             });
@@ -768,11 +774,16 @@ end:
  * line arguments
  * @return 0 on success, -1 on failure
  */
-int parseCommandLineArgs(int argc, char* argv[], char** filename)
+int parseCommandLineArgs(int argc, char* argv[], char** filename, char** path)
 {
-    static const char* const shortOpts = "f:";
+    static const char* const shortOpts = "f:p:";
     static const option      longOpts[]
-        = {{"file", required_argument, nullptr, 'f'}, {nullptr, 0, nullptr, 0}};
+        = {{"file", required_argument, nullptr, 'f'},
+           {"path", required_argument, nullptr, 'p'},
+           {nullptr, 0, nullptr, 0}};
+
+    *filename = nullptr;
+    *path = nullptr;
 
     int option;
     while ((option = getopt_long(argc, argv, shortOpts, longOpts, nullptr))
@@ -780,6 +791,9 @@ int parseCommandLineArgs(int argc, char* argv[], char** filename)
         switch (option) {
         case 'f':
             *filename = optarg;
+            break;
+        case 'p':
+            *path = optarg;
             break;
         case '?':
         default:
@@ -800,7 +814,8 @@ int main(int argc, char* argv[])
 
     // Parse command-line arguments
     char* filename = nullptr;
-    parseCommandLineArgs(argc, argv, &filename);
+    char* path     = nullptr;
+    parseCommandLineArgs(argc, argv, &filename, &path);
     if(filename) {
         margo_debug(engine.get_margo_instance(),
                     "[master] Reading from file %s", filename);
@@ -812,7 +827,7 @@ int main(int argc, char* argv[])
     std::istream* input
         = (!filename) ? &std::cin : (inputFile.open(filename), &inputFile);
 
-    Master master(engine);
+    Master master(engine, path);
 
     margo_debug(engine.get_margo_instance(), "[master] reading input stream");
     master.readInput(*input);
