@@ -8,6 +8,9 @@ spack:
   - json-c
   - mochi-ssg+mpi ^mpich
   - mochi-thallium
+  - tclap
+  - readline
+  - lua-sol2
   modules:
     prefix_inspections:
       lib: [LD_LIBRARY_PATH]

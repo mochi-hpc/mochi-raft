@@ -204,9 +204,11 @@ class WorkerProvider : public tl::provider<WorkerProvider> {
 
     int suspend(double timeout_ms) const
     {
+        margo_debug(get_engine().get_margo_instance(),
+                    "[worker:%lu] suspending for %lf msec", raftId, timeout_ms);
         try {
             get_engine().get_progress_pool().make_thread(
-                [timeout_ms]() { sleep(timeout_ms); }, tl::anonymous{});
+                [timeout_ms]() { sleep(timeout_ms/1000); }, tl::anonymous{});
         } catch (thallium::exception& ex) {
             margo_critical(get_engine().get_margo_instance(),
                            "[worker:%lu] %s", raftId, ex.what());

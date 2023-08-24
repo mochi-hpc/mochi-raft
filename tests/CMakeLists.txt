@@ -2,6 +2,18 @@ enable_testing ()
 
 find_package (MPI REQUIRED)
 find_package (thallium REQUIRED)
+find_package (sol2 REQUIRED)
+find_package (Lua REQUIRED)
+find_package (TCLAP REQUIRED)
+find_package (readline REQUIRED)
+set (CMAKE_CXX_STANDARD 17)
+set (CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include_directories (${LUA_INCLUDE_DIRS})
+
+add_executable (mraft-generic-test generic-test.cpp)
+target_link_libraries (mraft-generic-test
+    PRIVATE sol2::sol2 ${LUA_LIBRARIES} mochi-raft READLINE::READLINE)
 
 add_executable (mraft_get_raft_id mraft_get_raft_id.c)
 target_link_libraries (mraft_get_raft_id PUBLIC mochi-raft PkgConfig::SSG MPI::MPI_C)
