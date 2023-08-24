@@ -1,6 +1,9 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <sys/wait.h>
 #include <filesystem>
 #include <thallium.hpp>
 #include <mochi-raft.hpp>
@@ -21,6 +24,7 @@ struct Options {
 
 static void parseCommandLine(int argc, char** argv, Options& options);
 static void runMaster(const Options& options);
+[[noreturn]] static void runWorker(const Options& options, tl::engine engine);
 
 // ----------------------------------------------------------------------------
 // Main function
@@ -38,9 +42,8 @@ int main(int argc, char** argv) {
 // ----------------------------------------------------------------------------
 
 struct WorkerHandle {
-    tl::engine   engine;
     raft_id      raftID;
-    int          pID;
+    pid_t        pID;
     tl::endpoint address;
 
     auto to_string() const {
@@ -61,6 +64,49 @@ struct MasterContext {
     raft_id                                   nextRaftID = 1;
 };
 
+static std::optional<WorkerHandle> spawnWorker(MasterContext& master, const Options& options) {
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        perror("Pipe creation failed");
+        return std::nullopt;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("Fork failed");
+        return std::nullopt;
+    } else if (pid == 0) {
+        // Child process
+        close(pipefd[0]);
+        master.engine.finalize();
+        master = MasterContext{};
+
+        auto engine = tl::engine(options.protocol, MARGO_SERVER_MODE);
+        engine.enable_remote_shutdown();
+
+        auto address = static_cast<std::string>(engine.self());
+        address.resize(1024);
+
+        ssize_t _ = write(pipefd[1], address.data(), 1024);
+        close(pipefd[1]);
+
+        runWorker(options, engine);
+    } else {
+        // Parent process
+        close(pipefd[1]);
+        char address[1024];
+        ssize_t bytes_read = read(pipefd[0], address, 1024);
+        close(pipefd[0]);
+        auto raftID = master.nextRaftID++;
+        master.workers[raftID] = WorkerHandle{
+            master.nextRaftID++,
+            pid,
+            master.engine.lookup(address)
+        };
+        return master.workers[raftID];
+    }
+}
+
 static void runMaster(const Options& options) {
     MasterContext master;
     master.engine = tl::engine{options.protocol, THALLIUM_CLIENT_MODE};
@@ -72,14 +118,8 @@ static void runMaster(const Options& options) {
         "raft_id", sol::readonly(&WorkerHandle::raftID)
     );
 
-    master.lua.set_function("spawn", [&master]() mutable {
-        auto raftID = master.nextRaftID++;
-        master.workers[raftID] = WorkerHandle{
-            master.engine,
-            raftID,
-            1234,
-            master.engine.self()};
-        return master.workers[raftID];
+    master.lua.set_function("spawn", [&master, &options]() mutable {
+        return spawnWorker(master, options);
     });
 
     if(options.luaFile.empty()) {
@@ -97,6 +137,21 @@ static void runMaster(const Options& options) {
     } else {
         master.lua.script_file(options.luaFile);
     }
+
+    for(const auto& [raftID, worker] : master.workers) {
+        master.engine.shutdown_remote_engine(worker.address);
+        waitpid(worker.pID, nullptr, 0);
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Worker functionalities
+// ----------------------------------------------------------------------------
+
+[[noreturn]] static void runWorker(const Options& options, tl::engine engine) {
+    (void)options;
+    engine.wait_for_finalize();
+    std::exit(0);
 }
 
 // ----------------------------------------------------------------------------
