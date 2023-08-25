@@ -5,9 +5,11 @@
 #include <stdio.h>
 #include <sys/wait.h>
 #include <filesystem>
+#include <map>
 #include <thallium.hpp>
 #include <mochi-raft.hpp>
 #include <tclap/CmdLine.h>
+#define SOL_ALL_SAFETIES_ON 1
 #include <sol/sol.hpp>
 
 namespace fs = std::filesystem;
@@ -42,26 +44,42 @@ int main(int argc, char** argv) {
 // ----------------------------------------------------------------------------
 
 struct WorkerHandle {
-    raft_id      raftID;
-    pid_t        pID;
+    raft_id      raftID = 0;
+    pid_t        pID    = -1;
     tl::endpoint address;
 
     auto to_string() const {
         std::stringstream stream;
-        stream << "WorkerHandle@" << (void*)this
+        auto addr = (pID == -1) ? std::string{"?"} : static_cast<std::string>(address);
+        stream << "WorkerHandle"
                << " {raftID=" << raftID
                << ", pID=" << pID
-               << ", address=" << address
+               << ", address=" << addr
                << "}";
         return stream.str();
     }
 };
 
+struct Cluster {
+
+    std::map<raft_id, WorkerHandle> workers;
+
+    auto to_string() const {
+        std::stringstream stream;
+        for(const auto& [raftID, worker] : workers) {
+            stream << "- " << worker.to_string() << "\n";
+        }
+        auto result = stream.str();
+        if(!result.empty()) result.resize(result.size()-1);
+        return result;
+    }
+};
+
 struct MasterContext {
-    tl::engine                                engine;
-    sol::state                                lua;
-    std::unordered_map<raft_id, WorkerHandle> workers;
-    raft_id                                   nextRaftID = 1;
+    tl::engine               engine;
+    sol::state               lua;
+    std::shared_ptr<Cluster> cluster;
+    raft_id                  nextRaftID = 1;
 };
 
 static std::optional<WorkerHandle> spawnWorker(MasterContext& master, const Options& options) {
@@ -79,14 +97,12 @@ static std::optional<WorkerHandle> spawnWorker(MasterContext& master, const Opti
         // Child process
         close(pipefd[0]);
         master.engine.finalize();
-        master = MasterContext{};
 
         auto engine = tl::engine(options.protocol, MARGO_SERVER_MODE);
         engine.enable_remote_shutdown();
 
         auto address = static_cast<std::string>(engine.self());
         address.resize(1024);
-
         ssize_t _ = write(pipefd[1], address.data(), 1024);
         close(pipefd[1]);
 
@@ -98,12 +114,10 @@ static std::optional<WorkerHandle> spawnWorker(MasterContext& master, const Opti
         ssize_t bytes_read = read(pipefd[0], address, 1024);
         close(pipefd[0]);
         auto raftID = master.nextRaftID++;
-        master.workers[raftID] = WorkerHandle{
-            master.nextRaftID++,
-            pid,
-            master.engine.lookup(address)
+        master.cluster->workers[raftID] = WorkerHandle{
+            raftID, pid, master.engine.lookup(address)
         };
-        return master.workers[raftID];
+        return master.cluster->workers[raftID];
     }
 }
 
@@ -111,15 +125,46 @@ static void runMaster(const Options& options) {
     MasterContext master;
     master.engine = tl::engine{options.protocol, THALLIUM_CLIENT_MODE};
     master.engine.set_log_level(options.masterLogLevel);
-    master.lua.open_libraries(sol::lib::base);
+    master.lua.open_libraries(sol::lib::base, sol::lib::string, sol::lib::math);
+    master.cluster = std::make_shared<Cluster>();
+
+    master.lua.new_usertype<Cluster>("Cluster",
+        sol::meta_function::index, [](Cluster& cluster, raft_id id) -> std::optional<WorkerHandle> {
+            if(cluster.workers.count(id) == 0) return std::nullopt;
+            return cluster.workers[id];
+        }
+    );
+
+    master.lua["cluster"] = master.cluster;
 
     master.lua.new_usertype<WorkerHandle>("Worker",
         "address", sol::property([](const WorkerHandle& w) { return static_cast<std::string>(w.address); }),
-        "raft_id", sol::readonly(&WorkerHandle::raftID)
+        "raft_id", sol::readonly(&WorkerHandle::raftID),
+
+        // kill command (send SIGKILL to worker)
+        "kill", [&master](WorkerHandle& self) mutable {
+            static WorkerHandle none;
+            auto& workers = master.cluster->workers;
+            auto it = workers.find(self.raftID);
+            if(it == workers.end()) {
+                auto mid = master.engine.get_margo_instance();
+                margo_error(mid, "[master] worker not found in the cluster");
+                return;
+            }
+            kill(self.pID, SIGKILL);
+            waitpid(self.pID, NULL, 0);
+            workers.erase(it);
+            self.address = tl::endpoint();
+            self.pID = -1;
+        }
     );
 
     master.lua.set_function("spawn", [&master, &options]() mutable {
         return spawnWorker(master, options);
+    });
+
+    master.lua.set_function("sleep", [](unsigned msec) {
+        usleep(msec*1000);
     });
 
     if(options.luaFile.empty()) {
@@ -129,16 +174,18 @@ static void runMaster(const Options& options) {
             std::string line{l};
             while(!line.empty() && !::isalnum(line.front())) line = line.substr(1);
             if(line.rfind("exit", 0) == 0) break;
-            std::string r = master.lua.do_string(line);
-            while(!r.empty() && r.back() == '\n') r.resize(r.size()-1);
-            if(!r.empty()) std::cout << r << '\n';
+            master.lua.script(line, [](lua_State*, sol::protected_function_result pfr) {
+                sol::error err = pfr;
+                std::cout << err.what() << std::endl;
+                return pfr;
+            });
             free(l);
         }
     } else {
         master.lua.script_file(options.luaFile);
     }
 
-    for(const auto& [raftID, worker] : master.workers) {
+    for(const auto& [raftID, worker] : master.cluster->workers) {
         master.engine.shutdown_remote_engine(worker.address);
         waitpid(worker.pID, nullptr, 0);
     }
