@@ -52,10 +52,12 @@ struct FSM : public mraft::StateMachine {
     : id(id) {}
 
     void apply(const struct raft_buffer* buf, void** result) override {
+        std::unique_lock<tl::mutex> lock{content_mtx};
         content.append(std::string_view{(const char*)buf->base, buf->len});
     }
 
     void snapshot(struct raft_buffer* bufs[], unsigned* n_bufs) override {
+        std::unique_lock<tl::mutex> lock{content_mtx};
         *bufs   = static_cast<raft_buffer*>(raft_malloc(sizeof(**bufs)));
         *n_bufs = 1;
         (*bufs)[0].base = strdup(content.c_str());
@@ -63,11 +65,13 @@ struct FSM : public mraft::StateMachine {
     }
 
     void restore(struct raft_buffer* buf) override {
+        std::unique_lock<tl::mutex> lock{content_mtx};
         content.assign(std::string_view{(const char*)buf->base, buf->len});
     }
 
-    raft_id     id;
-    std::string content;
+    raft_id           id;
+    std::string       content;
+    mutable tl::mutex content_mtx;
 
 };
 
@@ -89,6 +93,7 @@ struct Worker : public tl::provider<Worker> {
         DEFINE_WORKER_RPC(get_leader);
         DEFINE_WORKER_RPC(transfer);
         DEFINE_WORKER_RPC(suspend);
+        DEFINE_WORKER_RPC(barrier);
         DEFINE_WORKER_RPC(get_fsm_content);
         #undef DEFINE_WORKER_RPC
     }
@@ -134,6 +139,10 @@ struct Worker : public tl::provider<Worker> {
         WRAP_CALL(apply, &bufs, 1U);
     }
 
+    int barrier() {
+        WRAP_CALL(barrier);
+    }
+
     mraft::ServerInfo get_leader() const {
         mraft::ServerInfo leaderInfo{0, ""};
         try {
@@ -151,7 +160,8 @@ struct Worker : public tl::provider<Worker> {
         usleep(msec*1000);
     }
 
-    const std::string& get_fsm_content() const {
+    std::string get_fsm_content() const {
+        std::unique_lock<tl::mutex> lock{fsm.content_mtx};
         return fsm.content;
     }
 
@@ -198,6 +208,10 @@ struct Cluster {
     tl::remote_procedure            rpc_start;
     tl::remote_procedure            rpc_apply;
     tl::remote_procedure            rpc_get_leader;
+    tl::remote_procedure            rpc_get_fsm_content;
+    tl::remote_procedure            rpc_barrier;
+    tl::remote_procedure            rpc_assign;
+    tl::remote_procedure            rpc_transfer;
 
     Cluster(tl::engine engine)
     : engine(engine)
@@ -205,6 +219,10 @@ struct Cluster {
     , rpc_start(engine.define("mraft_test_start"))
     , rpc_apply(engine.define("mraft_test_apply"))
     , rpc_get_leader(engine.define("mraft_test_get_leader"))
+    , rpc_get_fsm_content(engine.define("mraft_test_get_fsm_content"))
+    , rpc_barrier(engine.define("mraft_test_barrier"))
+    , rpc_assign(engine.define("mraft_test_assign"))
+    , rpc_transfer(engine.define("mraft_test_transfer"))
     {}
 
     auto to_string() const {
@@ -301,6 +319,11 @@ static void runMaster(const Options& options) {
     master.lua.open_libraries(sol::lib::base, sol::lib::string, sol::lib::math);
     master.cluster = std::make_shared<Cluster>(master.engine);
 
+    master.lua.new_enum("Role",
+        "STANDBY", mraft::Role::STANDBY,
+        "VOTER",   mraft::Role::VOTER,
+        "SPARE",   mraft::Role::SPARE);
+
     master.lua.new_usertype<Cluster>("Cluster",
         sol::meta_function::index, [](Cluster& cluster, raft_id id) -> std::optional<WorkerHandle> {
             if(cluster.workers.count(id) == 0) return std::nullopt;
@@ -320,11 +343,66 @@ static void runMaster(const Options& options) {
                  (const WorkerHandle& w, const std::string& command) {
             try {
                 rpc.on(w.address).timed(1s, command);
+                return true;
+            } catch(tl::timeout& ex) {
+                margo_error(mid, "[master] apply timed out");
             } catch(const std::exception& ex) {
-                margo_error(mid, "[master] applyed failed: %s", ex.what());
+                margo_error(mid, "[master] apply failed: %s", ex.what());
             }
+            return false;
         },
-        // get_leader command (asks the worker who the leader currently is)
+        // assign (asks the worker to assign another worker the specified role)
+        "assign", [rpc=master.cluster->rpc_assign, mid=master.engine.get_margo_instance()]
+                 (const WorkerHandle& w, raft_id id, mraft::Role role) {
+            try {
+                rpc.on(w.address).timed(1s, id, role);
+                return true;
+            } catch(tl::timeout& ex) {
+                margo_error(mid, "[master] assign timed out");
+            } catch(const std::exception& ex) {
+                margo_error(mid, "[master] assign failed: %s", ex.what());
+            }
+            return false;
+        },
+        // transfer (asks the worker to request leadership be transfered to another worker)
+        "transfer", [rpc=master.cluster->rpc_transfer, mid=master.engine.get_margo_instance()]
+                 (const WorkerHandle& w, raft_id id) {
+            try {
+                rpc.on(w.address).timed(1s, id);
+                return true;
+            } catch(tl::timeout& ex) {
+                margo_error(mid, "[master] transfer timed out");
+            }  catch(const std::exception& ex) {
+                margo_error(mid, "[master] transfer failed: %s", ex.what());
+            }
+            return false;
+        },
+        // barrier (wait for the commands to be committed)
+        "barrier", [rpc=master.cluster->rpc_barrier, mid=master.engine.get_margo_instance()]
+                 (const WorkerHandle& w) -> bool {
+            try {
+                rpc.on(w.address).timed(1s);
+                return true;
+            } catch(tl::timeout& ex) {
+                margo_error(mid, "[master] barrier timed out");
+            } catch(const std::exception& ex) {
+                margo_error(mid, "[master] barrier failed: %s", ex.what());
+            }
+            return false;
+        },
+        // get_fsm_content (asks the worker for the content of its FSM)
+        "get_fsm_content", [rpc=master.cluster->rpc_get_fsm_content, mid=master.engine.get_margo_instance()]
+                 (const WorkerHandle& w) -> std::optional<std::string> {
+            try {
+                return static_cast<std::string>(rpc.on(w.address).timed(1s));
+            } catch(tl::timeout& ex) {
+                margo_error(mid, "[master] get_fsm_content timed out");
+            } catch(const std::exception& ex) {
+                margo_error(mid, "[master] get_fsm_content failed: %s", ex.what());
+            }
+            return std::nullopt;
+        },
+        // get_leader (asks the worker who the leader currently is)
         "get_leader", [&master, rpc=master.cluster->rpc_get_leader, mid=master.engine.get_margo_instance()]
                  (const WorkerHandle& w) -> std::optional<WorkerHandle> {
             try {
@@ -333,8 +411,10 @@ static void runMaster(const Options& options) {
                 auto it = workers.find(info.id);
                 if(it == workers.end()) return std::nullopt;
                 return it->second;
+            } catch(tl::timeout& ex) {
+                margo_error(mid, "[master] get_leader timed out");
             } catch(const std::exception& ex) {
-                margo_error(mid, "[master] applyed failed: %s", ex.what());
+                margo_error(mid, "[master] get_leader failed: %s", ex.what());
             }
             return std::nullopt;
         },
