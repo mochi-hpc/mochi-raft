@@ -14,6 +14,7 @@
 #include <tclap/CmdLine.h>
 #define SOL_ALL_SAFETIES_ON 1
 #include <sol/sol.hpp>
+#include <chrono>
 
 namespace fs = std::filesystem;
 namespace tl = thallium;
@@ -92,14 +93,17 @@ struct Worker : public tl::provider<Worker> {
         #undef DEFINE_WORKER_RPC
     }
 
-    #define WRAP_CALL(func, ...)                   \
-    do {                                           \
-        try {                                      \
-            raft.func(__VA_ARGS__);                \
-        } catch (const mraft::RaftException& ex) { \
-            return ex.code();                      \
-        }                                          \
-        return 0;                                  \
+    #define WRAP_CALL(func, ...)                          \
+    do {                                                  \
+        try {                                             \
+            raft.func(__VA_ARGS__);                       \
+        } catch (const mraft::RaftException& ex) {        \
+            margo_error(get_engine().get_margo_instance(),\
+                "[worker:%lu] %s failed: %s",             \
+                id, #func, raft_strerror(ex.code()));     \
+            return ex.code();                             \
+        }                                                 \
+        return 0;                                         \
     } while (0)
 
     int bootstrap(const std::vector<mraft::ServerInfo>& servers) {
@@ -178,6 +182,12 @@ struct WorkerHandle {
                << "}";
         return stream.str();
     }
+
+    bool operator==(const WorkerHandle& other) const {
+        return raftID == other.raftID
+            && pID == other.pID
+            && address == other.address;
+    }
 };
 
 struct Cluster {
@@ -185,11 +195,16 @@ struct Cluster {
     std::map<raft_id, WorkerHandle> workers;
     tl::engine                      engine;
     tl::remote_procedure            rpc_bootstrap;
-
+    tl::remote_procedure            rpc_start;
+    tl::remote_procedure            rpc_apply;
+    tl::remote_procedure            rpc_get_leader;
 
     Cluster(tl::engine engine)
     : engine(engine)
     , rpc_bootstrap(engine.define("mraft_test_bootstrap"))
+    , rpc_start(engine.define("mraft_test_start"))
+    , rpc_apply(engine.define("mraft_test_apply"))
+    , rpc_get_leader(engine.define("mraft_test_get_leader"))
     {}
 
     auto to_string() const {
@@ -206,11 +221,20 @@ struct Cluster {
         std::vector<mraft::ServerInfo> servers;
         servers.reserve(workers.size());
         for(auto& [id, worker] : workers)
-            servers.push_back({id, worker.address});
+            servers.push_back({id, worker.address, mraft::Role::VOTER});
         std::vector<tl::async_response> responses;
         responses.reserve(workers.size());
         for(auto& [id, worker] : workers)
             responses.push_back(rpc_bootstrap.on(worker.address).async(servers));
+        for(auto& response : responses)
+            response.wait();
+    }
+
+    void start() const {
+        std::vector<tl::async_response> responses;
+        responses.reserve(workers.size());
+        for(auto& [id, worker] : workers)
+            responses.push_back(rpc_start.on(worker.address).async());
         for(auto& response : responses)
             response.wait();
     }
@@ -286,10 +310,52 @@ static void runMaster(const Options& options) {
 
     master.lua["cluster"] = master.cluster;
 
+    using namespace std::literals::chrono_literals;
+
     master.lua.new_usertype<WorkerHandle>("Worker",
         "address", sol::property([](const WorkerHandle& w) { return static_cast<std::string>(w.address); }),
         "raft_id", sol::readonly(&WorkerHandle::raftID),
-
+        // apply command (asks the worker to apply a command)
+        "apply", [rpc=master.cluster->rpc_apply, mid=master.engine.get_margo_instance()]
+                 (const WorkerHandle& w, const std::string& command) {
+            try {
+                rpc.on(w.address).timed(1s, command);
+            } catch(const std::exception& ex) {
+                margo_error(mid, "[master] applyed failed: %s", ex.what());
+            }
+        },
+        // get_leader command (asks the worker who the leader currently is)
+        "get_leader", [&master, rpc=master.cluster->rpc_get_leader, mid=master.engine.get_margo_instance()]
+                 (const WorkerHandle& w) -> std::optional<WorkerHandle> {
+            try {
+                mraft::ServerInfo info = rpc.on(w.address).timed(1s);
+                auto& workers = master.cluster->workers;
+                auto it = workers.find(info.id);
+                if(it == workers.end()) return std::nullopt;
+                return it->second;
+            } catch(const std::exception& ex) {
+                margo_error(mid, "[master] applyed failed: %s", ex.what());
+            }
+            return std::nullopt;
+        },
+        // shutdown command (sends a remote shutdown RPC to the worker's margo instance
+        "shutdown", [&master](WorkerHandle& self) mutable {
+            static WorkerHandle none;
+            auto& workers = master.cluster->workers;
+            auto it = workers.find(self.raftID);
+            if(it == workers.end()) {
+                auto mid = master.engine.get_margo_instance();
+                margo_error(mid, "[master] worker not found in the cluster");
+                return;
+            }
+            master.engine.shutdown_remote_engine(it->second.address);
+            while(waitpid(self.pID, NULL, WNOHANG) != self.pID) {
+                usleep(100);
+            }
+            self.address = tl::endpoint();
+            self.pID = -1;
+            workers.erase(it);
+        },
         // kill command (send SIGKILL to worker)
         "kill", [&master](WorkerHandle& self) mutable {
             static WorkerHandle none;
@@ -302,9 +368,9 @@ static void runMaster(const Options& options) {
             }
             kill(self.pID, SIGKILL);
             waitpid(self.pID, NULL, 0);
-            workers.erase(it);
             self.address = tl::endpoint();
             self.pID = -1;
+            workers.erase(it);
         }
     );
 
@@ -326,7 +392,9 @@ static void runMaster(const Options& options) {
         }
     }
     master.cluster->bootstrap();
+    master.cluster->start();
 
+    // execution of lua code
     if(options.luaFile.empty()) {
         char* l;
         while((l = readline(">> ")) != nullptr) {
