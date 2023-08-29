@@ -34,7 +34,7 @@ struct Options {
 };
 
 static void parseCommandLine(int argc, char** argv, Options& options);
-static void runMaster(const Options& options);
+static int runMaster(const Options& options);
 
 // ----------------------------------------------------------------------------
 // Main function
@@ -43,8 +43,7 @@ static void runMaster(const Options& options);
 int main(int argc, char** argv) {
     Options options;
     parseCommandLine(argc, argv, options);
-    runMaster(options);
-    return 0;
+    return runMaster(options);
 }
 
 // ----------------------------------------------------------------------------
@@ -375,7 +374,9 @@ static sptr<WorkerHandle> spawnWorker(MasterContext& master, const Options& opti
     }
 }
 
-static void runMaster(const Options& options) {
+static int runMaster(const Options& options) {
+
+    int ret = 0;
     MasterContext master;
     master.engine = tl::engine{options.protocol, THALLIUM_CLIENT_MODE};
     master.engine.set_log_level(options.masterLogLevel);
@@ -641,6 +642,7 @@ static void runMaster(const Options& options) {
         if(!w) {
             margo_critical(master.engine.get_margo_instance(),
                 "Could not spawn initial worker %lu", i);
+            ret = 1;
             goto cleanup;
         }
     }
@@ -663,7 +665,12 @@ static void runMaster(const Options& options) {
             free(l);
         }
     } else {
-        master.lua.script_file(options.luaFile);
+        try {
+            master.lua.script_file(options.luaFile);
+        } catch(const std::exception& ex) {
+            margo_critical(master.engine.get_margo_instance(), "%s", ex.what());
+            ret = 1;
+        }
     }
 
 cleanup:
@@ -671,6 +678,8 @@ cleanup:
         master.engine.shutdown_remote_engine(worker->address);
         waitpid(worker->pID, nullptr, 0);
     }
+
+    return ret;
 }
 
 // ----------------------------------------------------------------------------
