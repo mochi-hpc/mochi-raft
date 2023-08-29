@@ -36,7 +36,7 @@ target_link_libraries (mraft-test
 #add_executable (abt-io-log-generic-test abt-io-log-generic-test.cpp)
 #target_link_libraries (abt-io-log-generic-test PUBLIC mochi-raft thallium)
 
-file (GLOB scenarios ${CMAKE_CURRENT_SOURCE_DIR}/scenarios/*.txt)
+file (GLOB scenarios ${CMAKE_CURRENT_SOURCE_DIR}/scenarios/*.lua)
 foreach (scenario ${scenarios})
     get_filename_component (test-name ${scenario} NAME_WE)
     add_test (NAME ${test-name}

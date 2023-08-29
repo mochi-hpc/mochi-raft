@@ -306,6 +306,17 @@ struct Cluster {
         for(auto& [id, worker] : workers)
             worker->knownRunning = true;
     }
+
+    void waitForLeader() {
+        for(const auto& [id, worker] : workers) {
+            mraft::ServerInfo info;
+            while(true) {
+                info = rpc_get_leader.on(worker->address)();
+                if(info.id != 0) break;
+                tl::thread::sleep(engine, 500);
+            }
+        }
+    }
 };
 
 struct MasterContext {
@@ -648,6 +659,7 @@ static int runMaster(const Options& options) {
     }
     master.cluster->bootstrap();
     master.cluster->start();
+    master.cluster->waitForLeader();
 
     // execution of lua code
     if(options.luaFile.empty()) {
