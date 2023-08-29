@@ -30,6 +30,7 @@ struct Options {
     std::string       luaFile;
     size_t            initClusterSize;
     std::string       logPath;
+    std::string       logType;
 };
 
 static void parseCommandLine(int argc, char** argv, Options& options);
@@ -81,11 +82,11 @@ struct FSM : public mraft::StateMachine {
 
 struct Worker : public tl::provider<Worker> {
 
-    Worker(tl::engine engine, raft_id raftID, const char* config = nullptr)
+    Worker(tl::engine engine, raft_id raftID, std::unique_ptr<mraft::Log> theLog)
     : tl::provider<Worker>(engine, 0)
     , fsm{raftID}
-    , abtlog{id, ABT_IO_INSTANCE_NULL, config, engine.get_margo_instance()}
-    , raft{engine.get_margo_instance(), raftID, fsm, abtlog}
+    , log{std::move(theLog)}
+    , raft{engine.get_margo_instance(), raftID, fsm, *log}
     , id{raftID} {
         #define DEFINE_WORKER_RPC(__rpc__) define("mraft_test_" #__rpc__, &Worker::__rpc__)
         DEFINE_WORKER_RPC(bootstrap);
@@ -177,10 +178,10 @@ struct Worker : public tl::provider<Worker> {
 
     #undef WRAP_CALL
 
-    raft_id         id;
-    FSM             fsm;
-    mraft::AbtIoLog abtlog;
-    mraft::Raft     raft;
+    raft_id                     id;
+    FSM                         fsm;
+    std::unique_ptr<mraft::Log> log;
+    mraft::Raft                 raft;
 };
 
 // ----------------------------------------------------------------------------
@@ -338,7 +339,14 @@ static sptr<WorkerHandle> spawnWorker(MasterContext& master, const Options& opti
         auto engine = tl::engine(options.protocol, MARGO_SERVER_MODE);
         engine.enable_remote_shutdown();
 
-        auto worker = new Worker{engine, raftID};
+        std::unique_ptr<mraft::Log> log;
+        if(options.logType == "abt-io")
+            log = std::make_unique<mraft::AbtIoLog>(
+                raftID, ABT_IO_INSTANCE_NULL, nullptr, engine.get_margo_instance());
+        else
+            log = std::make_unique<mraft::MemoryLog>();
+
+        auto worker = new Worker{engine, raftID, std::move(log)};
         engine.push_finalize_callback([worker](){ delete worker; });
 
         auto address = static_cast<std::string>(engine.self());
@@ -678,7 +686,7 @@ static void parseCommandLine(int argc, char** argv, Options& options) {
                 "Log level for the worker (defaults to that of the master)",
                 false, "", "level");
         TCLAP::ValueArg<std::string> luaFile(
-                "j", "lua-file", "Lua file for the master to execute", false,
+                "f", "lua-file", "Lua file for the master to execute", false,
                 "", "filename");
         TCLAP::ValueArg<size_t> clusterSize(
                 "n", "cluster-size", "Initial number of processes the cluster contains",
@@ -686,6 +694,9 @@ static void parseCommandLine(int argc, char** argv, Options& options) {
         TCLAP::ValueArg<std::string> logPath(
                 "p", "log-path", "Path where the logs should be stored", false,
                 ".", "path");
+        TCLAP::ValueArg<std::string> logType(
+                "l", "log-type", "Type of log to use (\"abt-io\" or \"memory\")", false,
+                "abt-io", "type");
 
         cmd.add(protocol);
         cmd.add(masterLogLevel);
@@ -693,6 +704,7 @@ static void parseCommandLine(int argc, char** argv, Options& options) {
         cmd.add(luaFile);
         cmd.add(clusterSize);
         cmd.add(logPath);
+        cmd.add(logType);
         cmd.parse(argc, argv);
 
         static std::unordered_map<std::string, tl::logger::level> logLevelMap = {
@@ -709,6 +721,7 @@ static void parseCommandLine(int argc, char** argv, Options& options) {
         options.luaFile         = luaFile.getValue();
         options.initClusterSize = clusterSize.getValue();
         options.logPath         = logPath.getValue();
+        options.logType         = logType.getValue();
         if(logLevelMap.count(masterLogLevel.getValue()))
             options.masterLogLevel = logLevelMap[masterLogLevel.getValue()];
         else
@@ -728,6 +741,10 @@ static void parseCommandLine(int argc, char** argv, Options& options) {
         }
         if(options.initClusterSize == 0) {
             std::cerr << "error: cannot start with a cluster of size 0" << std::endl;
+            exit(-1);
+        }
+        if(options.logType != "abt-io" && options.logType != "memory") {
+            std::cerr << "error: invalid log type (should be \"abt-io\" or \"memory\")" << std::endl;
             exit(-1);
         }
 
