@@ -340,11 +340,17 @@ static sptr<WorkerHandle> spawnWorker(MasterContext& master, const Options& opti
         engine.enable_remote_shutdown();
 
         std::unique_ptr<mraft::Log> log;
-        if(options.logType == "abt-io")
+        if(options.logType == "abt-io") {
+            auto config = std::string{"{\"path\":\""} + options.logPath + "\"}";
             log = std::make_unique<mraft::AbtIoLog>(
-                raftID, ABT_IO_INSTANCE_NULL, nullptr, engine.get_margo_instance());
-        else
+                raftID, ABT_IO_INSTANCE_NULL, config.c_str(), engine.get_margo_instance());
+        } else {
+            if(options.logPath != ".")
+                margo_warning(engine.get_margo_instance(),
+                    "--log-path set to \"%s\" but will be ignored with the memory log",
+                    options.logPath.c_str());
             log = std::make_unique<mraft::MemoryLog>();
+        }
 
         auto worker = new Worker{engine, raftID, std::move(log)};
         engine.push_finalize_callback([worker](){ delete worker; });
