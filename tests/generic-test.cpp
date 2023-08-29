@@ -11,6 +11,7 @@
 #include <thallium/serialization/stl/vector.hpp>
 #include <thallium/serialization/stl/string.hpp>
 #include <mochi-raft.hpp>
+#include <mochi-raft-test.h>
 #include <tclap/CmdLine.h>
 #define SOL_ALL_SAFETIES_ON 1
 #include <sol/sol.hpp>
@@ -18,6 +19,9 @@
 
 namespace fs = std::filesystem;
 namespace tl = thallium;
+
+template<typename T>
+using sptr = std::shared_ptr<T>;
 
 struct Options {
     std::string       protocol;
@@ -94,6 +98,7 @@ struct Worker : public tl::provider<Worker> {
         DEFINE_WORKER_RPC(transfer);
         DEFINE_WORKER_RPC(suspend);
         DEFINE_WORKER_RPC(barrier);
+        DEFINE_WORKER_RPC(isolate);
         DEFINE_WORKER_RPC(get_fsm_content);
         #undef DEFINE_WORKER_RPC
     }
@@ -143,6 +148,11 @@ struct Worker : public tl::provider<Worker> {
         WRAP_CALL(barrier);
     }
 
+    int isolate(bool flag) {
+        auto raft_io = raft.get_raft_io();
+        return mraft_io_simulate_dead(raft_io, flag);
+    }
+
     mraft::ServerInfo get_leader() const {
         mraft::ServerInfo leaderInfo{0, ""};
         try {
@@ -177,10 +187,34 @@ struct Worker : public tl::provider<Worker> {
 // Master functions and structure definitions
 // ----------------------------------------------------------------------------
 
+static inline auto& operator<<(std::ostream& stream, const mraft::Role& role) {
+    switch(role) {
+    case mraft::Role::SPARE:
+        stream << "SPARE"; break;
+    case mraft::Role::VOTER:
+        stream << "VOTER"; break;
+    case mraft::Role::STANDBY:
+        stream << "STANDBY"; break;
+    default:
+        stream << "???";
+    }
+    return stream;
+}
+
 struct WorkerHandle {
+
     raft_id             raftID = 0;
     pid_t               pID    = -1;
     tl::provider_handle address;
+    mraft::Role         knownRole = mraft::Role::SPARE;
+    bool                knownRunning = false;
+
+    WorkerHandle() = default;
+
+    WorkerHandle(raft_id id, pid_t pid, tl::provider_handle addr)
+    : raftID(id)
+    , pID(pid)
+    , address(addr) {}
 
     auto to_string() const {
         std::stringstream stream;
@@ -189,6 +223,8 @@ struct WorkerHandle {
                << " {raftID=" << raftID
                << ", pID=" << pID
                << ", address=" << addr
+               << ", role=" << knownRole
+               << ", started=" << std::boolalpha << knownRunning
                << "}";
         return stream.str();
     }
@@ -202,16 +238,20 @@ struct WorkerHandle {
 
 struct Cluster {
 
-    std::map<raft_id, WorkerHandle> workers;
-    tl::engine                      engine;
-    tl::remote_procedure            rpc_bootstrap;
-    tl::remote_procedure            rpc_start;
-    tl::remote_procedure            rpc_apply;
-    tl::remote_procedure            rpc_get_leader;
-    tl::remote_procedure            rpc_get_fsm_content;
-    tl::remote_procedure            rpc_barrier;
-    tl::remote_procedure            rpc_assign;
-    tl::remote_procedure            rpc_transfer;
+    std::map<raft_id, sptr<WorkerHandle>> workers;
+    tl::engine                            engine;
+    tl::remote_procedure                  rpc_bootstrap;
+    tl::remote_procedure                  rpc_start;
+    tl::remote_procedure                  rpc_apply;
+    tl::remote_procedure                  rpc_get_leader;
+    tl::remote_procedure                  rpc_get_fsm_content;
+    tl::remote_procedure                  rpc_barrier;
+    tl::remote_procedure                  rpc_assign;
+    tl::remote_procedure                  rpc_transfer;
+    tl::remote_procedure                  rpc_add;
+    tl::remote_procedure                  rpc_remove;
+    tl::remote_procedure                  rpc_suspend;
+    tl::remote_procedure                  rpc_isolate;
 
     Cluster(tl::engine engine)
     : engine(engine)
@@ -223,38 +263,48 @@ struct Cluster {
     , rpc_barrier(engine.define("mraft_test_barrier"))
     , rpc_assign(engine.define("mraft_test_assign"))
     , rpc_transfer(engine.define("mraft_test_transfer"))
+    , rpc_add(engine.define("mraft_test_add"))
+    , rpc_remove(engine.define("mraft_test_remove"))
+    , rpc_suspend(engine.define("mraft_test_suspend"))
+    , rpc_isolate(engine.define("mraft_test_isolate"))
     {}
 
     auto to_string() const {
         std::stringstream stream;
         for(const auto& [raftID, worker] : workers) {
-            stream << "- " << worker.to_string() << "\n";
+            stream << "- " << worker->to_string() << "\n";
         }
         auto result = stream.str();
         if(!result.empty()) result.resize(result.size()-1);
         return result;
     }
 
-    void bootstrap() const {
+    void bootstrap() {
         std::vector<mraft::ServerInfo> servers;
         servers.reserve(workers.size());
-        for(auto& [id, worker] : workers)
-            servers.push_back({id, worker.address, mraft::Role::VOTER});
+        for(const auto& [id, worker] : workers)
+            servers.push_back({id, worker->address, mraft::Role::VOTER});
         std::vector<tl::async_response> responses;
         responses.reserve(workers.size());
-        for(auto& [id, worker] : workers)
-            responses.push_back(rpc_bootstrap.on(worker.address).async(servers));
+        for(const auto& [id, worker] : workers)
+            responses.push_back(rpc_bootstrap.on(worker->address).async(servers));
         for(auto& response : responses)
             response.wait();
+        for(auto& [id, worker] : workers)
+            worker->knownRole = mraft::Role::VOTER;
     }
 
-    void start() const {
+    void start() {
         std::vector<tl::async_response> responses;
         responses.reserve(workers.size());
-        for(auto& [id, worker] : workers)
-            responses.push_back(rpc_start.on(worker.address).async());
+        for(auto& [id, worker] : workers) {
+            if(worker->knownRunning) continue;
+            responses.push_back(rpc_start.on(worker->address).async());
+        }
         for(auto& response : responses)
             response.wait();
+        for(auto& [id, worker] : workers)
+            worker->knownRunning = true;
     }
 };
 
@@ -265,11 +315,11 @@ struct MasterContext {
     raft_id                  nextRaftID = 1;
 };
 
-static std::optional<WorkerHandle> spawnWorker(MasterContext& master, const Options& options) {
+static sptr<WorkerHandle> spawnWorker(MasterContext& master, const Options& options) {
     int pipefd[2];
     if (pipe(pipefd) == -1) {
         perror("Pipe creation failed");
-        return std::nullopt;
+        return nullptr;
     }
 
     auto raftID = master.nextRaftID++;
@@ -278,7 +328,7 @@ static std::optional<WorkerHandle> spawnWorker(MasterContext& master, const Opti
     if (pid < 0) {
         perror("Fork failed");
         master.nextRaftID--;
-        return std::nullopt;
+        return nullptr;
 
     } else if (pid == 0) {
         // Child process
@@ -305,9 +355,8 @@ static std::optional<WorkerHandle> spawnWorker(MasterContext& master, const Opti
         char address[1024];
         ssize_t bytes_read = read(pipefd[0], address, 1024);
         close(pipefd[0]);
-        master.cluster->workers[raftID] = WorkerHandle{
-            raftID, pid, tl::provider_handle{master.engine.lookup(address), 0}
-        };
+        master.cluster->workers[raftID] = std::make_shared<WorkerHandle>(
+            raftID, pid, tl::provider_handle{master.engine.lookup(address), 0});
         return master.cluster->workers[raftID];
     }
 }
@@ -325,9 +374,12 @@ static void runMaster(const Options& options) {
         "SPARE",   mraft::Role::SPARE);
 
     master.lua.new_usertype<Cluster>("Cluster",
-        sol::meta_function::index, [](Cluster& cluster, raft_id id) -> std::optional<WorkerHandle> {
-            if(cluster.workers.count(id) == 0) return std::nullopt;
+        sol::meta_function::index, [](Cluster& cluster, raft_id id) -> std::shared_ptr<WorkerHandle> {
+            if(cluster.workers.count(id) == 0) return nullptr;
             return cluster.workers[id];
+        },
+        "spawn", [&master, &options]() mutable {
+            return spawnWorker(master, options);
         }
     );
 
@@ -341,6 +393,10 @@ static void runMaster(const Options& options) {
         // apply command (asks the worker to apply a command)
         "apply", [rpc=master.cluster->rpc_apply, mid=master.engine.get_margo_instance()]
                  (const WorkerHandle& w, const std::string& command) {
+            if(!w.knownRunning) {
+                margo_error(mid, "[master] worker is not running");
+                return false;
+            }
             try {
                 rpc.on(w.address).timed(1s, command);
                 return true;
@@ -353,9 +409,14 @@ static void runMaster(const Options& options) {
         },
         // assign (asks the worker to assign another worker the specified role)
         "assign", [rpc=master.cluster->rpc_assign, mid=master.engine.get_margo_instance()]
-                 (const WorkerHandle& w, raft_id id, mraft::Role role) {
+                 (const WorkerHandle& w, WorkerHandle& target, mraft::Role role) {
+            if(!w.knownRunning) {
+                margo_error(mid, "[master] worker is not running");
+                return false;
+            }
             try {
-                rpc.on(w.address).timed(1s, id, role);
+                rpc.on(w.address).timed(1s, target.raftID, role);
+                target.knownRole = role;
                 return true;
             } catch(tl::timeout& ex) {
                 margo_error(mid, "[master] assign timed out");
@@ -364,9 +425,66 @@ static void runMaster(const Options& options) {
             }
             return false;
         },
-        // transfer (asks the worker to request leadership be transfered to another worker)
+        // add (asks the worker to ask the leader to add the given process)
+        "add", [rpc=master.cluster->rpc_add, mid=master.engine.get_margo_instance()]
+                 (const WorkerHandle& w, const WorkerHandle& toAdd) {
+            if(!w.knownRunning) {
+                margo_error(mid, "[master] worker is not running");
+                return false;
+            }
+            try {
+                rpc.on(w.address).timed(1s,
+                    toAdd.raftID, static_cast<std::string>(toAdd.address));
+                return true;
+            } catch(tl::timeout& ex) {
+                margo_error(mid, "[master] add timed out");
+            } catch(const std::exception& ex) {
+                margo_error(mid, "[master] add failed: %s", ex.what());
+            }
+            return false;
+        },
+        // remove (asks the worker to ask the leader to remove the given process)
+        "remove", [rpc=master.cluster->rpc_remove, mid=master.engine.get_margo_instance()]
+                 (const WorkerHandle& w, const WorkerHandle& toRemove) {
+            if(!w.knownRunning) {
+                margo_error(mid, "[master] worker is not running");
+                return false;
+            }
+            try {
+                rpc.on(w.address).timed(1s, toRemove.raftID);
+                return true;
+            } catch(tl::timeout& ex) {
+                margo_error(mid, "[master] remove timed out");
+            } catch(const std::exception& ex) {
+                margo_error(mid, "[master] remove failed: %s", ex.what());
+            }
+            return false;
+        },
+        // start (start the worker, if it is not started already)
+        "start", [&master, rpc=master.cluster->rpc_start, mid=master.engine.get_margo_instance()]
+                 (WorkerHandle& w) {
+            if(w.knownRunning) {
+                margo_error(mid, "[master] worker is already running");
+                return false;
+            }
+            try {
+                rpc.on(w.address).timed(1s);
+                w.knownRunning = true;
+                return true;
+            } catch(tl::timeout& ex) {
+                margo_error(mid, "[master] start timed out");
+            } catch(const std::exception& ex) {
+                margo_error(mid, "[master] start failed: %s", ex.what());
+            }
+            return false;
+        },
+        // transfer (asks the worker to request leadership be transferred to another worker)
         "transfer", [rpc=master.cluster->rpc_transfer, mid=master.engine.get_margo_instance()]
                  (const WorkerHandle& w, raft_id id) {
+            if(!w.knownRunning) {
+                margo_error(mid, "[master] worker is not running");
+                return false;
+            }
             try {
                 rpc.on(w.address).timed(1s, id);
                 return true;
@@ -380,6 +498,10 @@ static void runMaster(const Options& options) {
         // barrier (wait for the commands to be committed)
         "barrier", [rpc=master.cluster->rpc_barrier, mid=master.engine.get_margo_instance()]
                  (const WorkerHandle& w) -> bool {
+            if(!w.knownRunning) {
+                margo_error(mid, "[master] worker is not running");
+                return false;
+            }
             try {
                 rpc.on(w.address).timed(1s);
                 return true;
@@ -390,9 +512,47 @@ static void runMaster(const Options& options) {
             }
             return false;
         },
+        // suspend (put the process to sleep for the target number of milliseconds)
+        "suspend", [rpc=master.cluster->rpc_suspend, mid=master.engine.get_margo_instance()]
+                 (const WorkerHandle& w, unsigned msec) -> bool {
+            if(!w.knownRunning) {
+                margo_error(mid, "[master] worker is not running");
+                return false;
+            }
+            try {
+                rpc.on(w.address).timed(1s, msec);
+                return true;
+            } catch(tl::timeout& ex) {
+                margo_error(mid, "[master] suspend timed out");
+            } catch(const std::exception& ex) {
+                margo_error(mid, "[master] suspend failed: %s", ex.what());
+            }
+            return false;
+        },
+        // isolate (isolate the process by making it ignore all RPCs)
+        "isolate", [rpc=master.cluster->rpc_isolate, mid=master.engine.get_margo_instance()]
+                 (const WorkerHandle& w, bool flag) -> bool {
+            if(!w.knownRunning) {
+                margo_error(mid, "[master] worker is not running");
+                return false;
+            }
+            try {
+                rpc.on(w.address).timed(1s, flag);
+                return true;
+            } catch(tl::timeout& ex) {
+                margo_error(mid, "[master] isolate timed out");
+            } catch(const std::exception& ex) {
+                margo_error(mid, "[master] isolate failed: %s", ex.what());
+            }
+            return false;
+        },
         // get_fsm_content (asks the worker for the content of its FSM)
         "get_fsm_content", [rpc=master.cluster->rpc_get_fsm_content, mid=master.engine.get_margo_instance()]
                  (const WorkerHandle& w) -> std::optional<std::string> {
+            if(!w.knownRunning) {
+                margo_error(mid, "[master] worker is not running");
+                return std::nullopt;
+            }
             try {
                 return static_cast<std::string>(rpc.on(w.address).timed(1s));
             } catch(tl::timeout& ex) {
@@ -404,19 +564,23 @@ static void runMaster(const Options& options) {
         },
         // get_leader (asks the worker who the leader currently is)
         "get_leader", [&master, rpc=master.cluster->rpc_get_leader, mid=master.engine.get_margo_instance()]
-                 (const WorkerHandle& w) -> std::optional<WorkerHandle> {
+                 (const WorkerHandle& w) -> std::shared_ptr<WorkerHandle> {
+            if(!w.knownRunning) {
+                margo_error(mid, "[master] worker is not running");
+                return nullptr;
+            }
             try {
                 mraft::ServerInfo info = rpc.on(w.address).timed(1s);
                 auto& workers = master.cluster->workers;
                 auto it = workers.find(info.id);
-                if(it == workers.end()) return std::nullopt;
+                if(it == workers.end()) return nullptr;
                 return it->second;
             } catch(tl::timeout& ex) {
                 margo_error(mid, "[master] get_leader timed out");
             } catch(const std::exception& ex) {
                 margo_error(mid, "[master] get_leader failed: %s", ex.what());
             }
-            return std::nullopt;
+            return nullptr;
         },
         // shutdown command (sends a remote shutdown RPC to the worker's margo instance
         "shutdown", [&master](WorkerHandle& self) mutable {
@@ -428,13 +592,12 @@ static void runMaster(const Options& options) {
                 margo_error(mid, "[master] worker not found in the cluster");
                 return;
             }
-            master.engine.shutdown_remote_engine(it->second.address);
+            master.engine.shutdown_remote_engine(it->second->address);
             while(waitpid(self.pID, NULL, WNOHANG) != self.pID) {
                 usleep(100);
             }
-            self.address = tl::endpoint();
-            self.pID = -1;
             workers.erase(it);
+            self = none;
         },
         // kill command (send SIGKILL to worker)
         "kill", [&master](WorkerHandle& self) mutable {
@@ -453,10 +616,6 @@ static void runMaster(const Options& options) {
             workers.erase(it);
         }
     );
-
-    master.lua.set_function("spawn", [&master, &options]() mutable {
-        return spawnWorker(master, options);
-    });
 
     master.lua.set_function("sleep", [](unsigned msec) {
         usleep(msec*1000);
@@ -495,8 +654,8 @@ static void runMaster(const Options& options) {
 
 cleanup:
     for(const auto& [raftID, worker] : master.cluster->workers) {
-        master.engine.shutdown_remote_engine(worker.address);
-        waitpid(worker.pID, nullptr, 0);
+        master.engine.shutdown_remote_engine(worker->address);
+        waitpid(worker->pID, nullptr, 0);
     }
 }
 

@@ -185,6 +185,10 @@ class Raft {
         raft_set_heartbeat_timeout(&m_raft, msecs);
     }
 
+    raft_io* get_raft_io() {
+        return &m_raft_io;
+    }
+
     template <typename ServerInfoContainer>
     void bootstrap(const ServerInfoContainer& serverList)
     {
