@@ -87,7 +87,7 @@ jobs:
                  -DENABLE_SSG=ON \
                  -DENABLE_EXAMPLES=ON &&
         make &&
-        ctest --output-on-failure
+        make check
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v2

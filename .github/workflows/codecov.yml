@@ -82,7 +82,7 @@ jobs:
                  -DENABLE_COVERAGE=ON \
                  -DENABLE_EXAMPLES=ON &&
         make &&
-        ctest --output-on-failure
+        make check
 
     - name: Send coverage report
       uses: codecov/codecov-action@v3

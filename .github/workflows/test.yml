@@ -81,4 +81,4 @@ jobs:
                  -DENABLE_SSG=ON \
                  -DENABLE_EXAMPLES=ON &&
         make &&
-        ctest --output-on-failure
+        make check
