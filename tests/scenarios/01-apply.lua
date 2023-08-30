@@ -1,3 +1,8 @@
+-- memory,abt-io
+-- This test applies 3 entries to the state machine,
+-- performs a barrier, then checks that the content
+-- of the state machine is as expected in all workers.
+
 expected = ""
 for i=1,3 do
   local entry = string.format("entry_%d", i)
