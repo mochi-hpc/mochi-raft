@@ -642,9 +642,8 @@ static int runMaster(const Options& options) {
             }
             kill(self.pID, SIGKILL);
             waitpid(self.pID, NULL, 0);
-            self.address = tl::endpoint();
-            self.pID = -1;
             workers.erase(it);
+            self = none;
         }
     );
 

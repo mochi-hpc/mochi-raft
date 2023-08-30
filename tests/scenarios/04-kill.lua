@@ -49,6 +49,9 @@ for i=1,3 do
   expected = expected .. entry
 end
 
+print("[lua] Issuing barrier")
+cluster[1]:barrier()
+
 print("[lua] Checking the content of the state machines")
 print("[lua] Expected content: " .. expected)
 for i=1,3 do
