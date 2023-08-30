@@ -270,6 +270,10 @@ struct Cluster {
     , rpc_isolate(engine.define("mraft_test_isolate"))
     {}
 
+    size_t size() const {
+        return workers.size();
+    }
+
     auto to_string() const {
         std::stringstream stream;
         for(const auto& [raftID, worker] : workers) {
