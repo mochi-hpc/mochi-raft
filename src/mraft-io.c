@@ -184,8 +184,10 @@ int mraft_io_impl_bootstrap(struct raft_io *io, const struct raft_configuration 
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Boostrapping raft cluster");
     if(!impl->log->bootstrap) {
+        // LCOV_EXCL_START
         margo_error(impl->mid, "[mraft] bootstrap function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
+        // LCOV_EXCL_STOP
     }
     return (impl->log->bootstrap)(impl->log, conf);
 }
@@ -195,8 +197,10 @@ int mraft_io_impl_recover(struct raft_io *io, const struct raft_configuration *c
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Recovering raft cluster");
     if(!impl->log->recover) {
+        // LCOV_EXCL_START
         margo_error(impl->mid, "[mraft] recover function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
+        // LCOV_EXCL_STOP
     }
     return (impl->log->recover)(impl->log, conf);
 }
@@ -206,8 +210,10 @@ int mraft_io_impl_set_term(struct raft_io *io, raft_term term)
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Setting term to %lu", term);
     if(!impl->log->set_term) {
+        // LCOV_EXCL_START
         margo_error(impl->mid, "[mraft] set_term function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
+        // LCOV_EXCL_STOP
     }
     return (impl->log->set_term)(impl->log, term);
 }
@@ -217,8 +223,10 @@ int mraft_io_impl_set_vote(struct raft_io *io, raft_id server_id)
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Setting vote to %lu", server_id);
     if(!impl->log->set_vote) {
+        // LCOV_EXCL_START
         margo_error(impl->mid, "[mraft] set_vote function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
+        // LCOV_EXCL_STOP
     }
     return (impl->log->set_vote)(impl->log, server_id);
 }
