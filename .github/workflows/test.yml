@@ -82,3 +82,15 @@ jobs:
                  -DENABLE_EXAMPLES=ON &&
         make &&
         make check
+
+    - name: Compress results
+      if: always()
+      run: |
+        gzip build/tests/results.tar
+
+    - name: Archive and upload artifacts
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-results
+        path: build/tests/results.tar.gz

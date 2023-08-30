@@ -32,6 +32,7 @@ struct Options {
     size_t            initClusterSize;
     std::string       logPath;
     std::string       logType;
+    std::string       tracePath;
 };
 
 static void parseCommandLine(int argc, char** argv, Options& options);
@@ -351,7 +352,15 @@ static sptr<WorkerHandle> spawnWorker(MasterContext& master, const Options& opti
         close(pipefd[0]);
         master.engine.finalize();
 
+        if(!options.tracePath.empty()) {
+            auto stdoutFilename = options.tracePath + "/" + std::to_string(raftID) + ".out";
+            auto stderrFilename = options.tracePath + "/" + std::to_string(raftID) + ".err";
+            FILE* _ = freopen(stdoutFilename.c_str(), "a+", stdout);
+                  _ = freopen(stderrFilename.c_str(), "a+", stderr);
+        }
+
         auto engine = tl::engine(options.protocol, MARGO_SERVER_MODE);
+        engine.set_log_level(options.workerLogLevel);
         engine.enable_remote_shutdown();
 
         std::unique_ptr<mraft::Log> log;
@@ -725,6 +734,9 @@ static void parseCommandLine(int argc, char** argv, Options& options) {
         TCLAP::ValueArg<std::string> logPath(
                 "p", "log-path", "Path where the logs should be stored", false,
                 ".", "path");
+        TCLAP::ValueArg<std::string> tracePath(
+                "t", "trace-path", "Path where the worker traces should be stored", false,
+                "", "path");
         TCLAP::ValueArg<std::string> logType(
                 "l", "log-type", "Type of log to use (\"abt-io\" or \"memory\")", false,
                 "abt-io", "type");
@@ -736,6 +748,7 @@ static void parseCommandLine(int argc, char** argv, Options& options) {
         cmd.add(clusterSize);
         cmd.add(logPath);
         cmd.add(logType);
+        cmd.add(tracePath);
         cmd.parse(argc, argv);
 
         static std::unordered_map<std::string, tl::logger::level> logLevelMap = {
@@ -753,6 +766,7 @@ static void parseCommandLine(int argc, char** argv, Options& options) {
         options.initClusterSize = clusterSize.getValue();
         options.logPath         = logPath.getValue();
         options.logType         = logType.getValue();
+        options.tracePath       = tracePath.getValue();
         if(logLevelMap.count(masterLogLevel.getValue()))
             options.masterLogLevel = logLevelMap[masterLogLevel.getValue()];
         else

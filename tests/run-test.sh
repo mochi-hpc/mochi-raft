@@ -3,21 +3,22 @@
 SCENARIO=$1
 BACKEND=$2
 
-if [ "$BACKEND" = "abt-io" ]; then
-    STORAGE=`mktemp -d test-log-XXXXXXXX`
-    P_STORAGE="-p $STORAGE"
-else
-    P_STORAGE=""
-fi
+STORAGE=`mktemp -d test-log-XXXXXXXX`
 
-timeout 600 ./mraft-test na+sm -n 3 -f $SCENARIO $P_STORAGE -l $BACKEND
+timeout 60 ./mraft-test na+sm \
+    -n 3                      \
+    -f $SCENARIO              \
+    -p $STORAGE               \
+    -l $BACKEND               \
+    -w trace                  \
+    -t $STORAGE
 RET=$?
 
-if [ $RET -eq 0 ]
-then
-    if [[ -n $P_STORAGE ]]; then
-        rm -rf $STORAGE
-    fi
+if [ ! -e "results.tar" ]; then
+    tar --create --file=results.tar
 fi
+tar --append --file=results.tar $STORAGE
+
+rm -rf $STORAGE
 
 exit $RET
