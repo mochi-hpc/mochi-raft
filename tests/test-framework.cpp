@@ -103,6 +103,11 @@ struct Worker : public tl::provider<Worker> {
         DEFINE_WORKER_RPC(isolate);
         DEFINE_WORKER_RPC(get_fsm_content);
         #undef DEFINE_WORKER_RPC
+        raft.enable_tracer(true);
+        raft.set_tracer(
+            [mid=engine.get_margo_instance(), raftID](const char* file, int line, const char* msg) {
+                margo_trace(mid, "[worker:%d] [%s:%d] %s", (unsigned)raftID, file, line, msg);
+            });
     }
 
     #define WRAP_CALL(func, ...)                          \
