@@ -66,7 +66,7 @@ struct FSM : public mraft::StateMachine {
         *bufs   = static_cast<raft_buffer*>(raft_malloc(sizeof(**bufs)));
         *n_bufs = 1;
         (*bufs)[0].base = strdup(content.c_str());
-        (*bufs)[0].len  = content.size() + 1;
+        (*bufs)[0].len  = content.size();
     }
 
     void restore(struct raft_buffer* buf) override {

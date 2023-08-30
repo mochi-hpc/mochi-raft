@@ -40,8 +40,6 @@ static inline hg_return_t hg_proc_raft_buffer(hg_proc_t proc, struct raft_buffer
         buf->len = 0;
         buf->base = NULL;
         break;
-    default:
-        break;
     }
     return HG_SUCCESS;
 }
@@ -97,8 +95,6 @@ static inline hg_return_t hg_proc_raft_append_entries(hg_proc_t proc, struct raf
         }
         break;
     case HG_FREE:
-        break;
-    default:
         break;
     }
     return HG_SUCCESS;
