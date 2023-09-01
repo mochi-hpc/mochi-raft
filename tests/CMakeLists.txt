@@ -19,4 +19,4 @@ foreach (scenario ${scenarios})
     add_test (NAME ${test-name}-memory
               COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/run-test.sh ${scenario} memory)
 endforeach ()
-add_custom_target (check COMMAND ${CMAKE_CTEST_COMMAND} DEPENDS ${scenarios} mraft-test)
+add_custom_target (check COMMAND ${CMAKE_CTEST_COMMAND} DEPENDS ${scenarios} mraft-py-test)
