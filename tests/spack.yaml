@@ -10,7 +10,7 @@ spack:
   - mochi-thallium
   - tclap
   - readline
-  - lua-sol2
+  - py-pybind11
   modules:
     prefix_inspections:
       lib: [LD_LIBRARY_PATH]

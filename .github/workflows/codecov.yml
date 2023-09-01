@@ -90,10 +90,3 @@ jobs:
         fail_ci_if_error: true
         verbose: true
         gcov: true
-
-    - name: Archive and upload artifacts
-      if: always()
-      uses: actions/upload-artifact@v3
-      with:
-        name: test-results
-        path: build/tests/results.tar

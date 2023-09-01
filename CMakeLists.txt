@@ -5,6 +5,7 @@ project (mochi-raft C CXX)
 enable_testing ()
 
 add_library (coverage_config INTERFACE)
+add_library (asan_config INTERFACE)
 
 option (ENABLE_COVERAGE "Enable coverage reporting" OFF)
 option (ENABLE_TESTS    "Build tests" OFF)
@@ -12,6 +13,7 @@ option (ENABLE_EXAMPLES "Build examples" OFF)
 option (ENABLE_SSG      "Build SSG support" OFF)
 option (ENABLE_BEDROCK  "Build bedrock module" OFF)
 option (ENABLE_PYTHON   "Build the Python module" OFF)
+option (ENABLE_ASAN     "Build with address sanitizer" OFF)
 
 # add our cmake module directory to the path
 set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
@@ -42,6 +44,11 @@ if (ENABLE_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     else ()
         target_link_libraries (coverage_config INTERFACE --coverage)
     endif ()
+endif ()
+
+if (ENABLE_ASAN AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options (asan_config INTERFACE -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options (asan_config INTERFACE -fsanitize=address -fno-omit-frame-pointer)
 endif ()
 
 
@@ -86,16 +93,9 @@ if (${ENABLE_TESTS})
     if (NOT ${ENABLE_SSG})
         message (FATAL_ERROR "SSG is required when enabling testing")
     endif ()
-#    find_package (Catch2 QUIET)
-#    if (NOT Catch2_FOUND)
-#        include (FetchContent)
-#        FetchContent_Declare (
-#            Catch2
-#            GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-#            GIT_TAG        v3.0.1
-#        )
-#        FetchContent_MakeAvailable (Catch2)
-#    endif ()
+    if (NOT ${ENABLE_PYTHON})
+        message (FATAL_ERROR "Python support is required when enabling testing")
+    endif ()
     add_subdirectory (tests)
 endif (${ENABLE_TESTS})
 
