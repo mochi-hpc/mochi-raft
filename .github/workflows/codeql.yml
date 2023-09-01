@@ -85,6 +85,7 @@ jobs:
         cmake .. -DENABLE_TESTS=ON \
                  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
                  -DENABLE_SSG=ON \
+                 -DENABLE_PYTHON=ON \
                  -DENABLE_EXAMPLES=ON &&
         make &&
         make check
