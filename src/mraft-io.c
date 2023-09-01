@@ -151,7 +151,7 @@ int mraft_io_impl_load(struct raft_io *io,
 static void ticker_ult(void* args)
 {
     struct raft_io* io = (struct raft_io*)args;
-    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
+    volatile struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Starting ticker ULT");
     raft_io_tick_cb tick = impl->tick_cb;
     while(tick) {
