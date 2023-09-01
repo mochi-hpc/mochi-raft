@@ -261,7 +261,6 @@ int mraft_io_impl_send(struct raft_io *io,
         margo_error(impl->mid,
             "[mraft] Could not resolve address %s: margo_addr_lookup returned %d",
             message->server_address, hret);
-        if(cb) cb(req, RAFT_CANCELED);
         return MRAFT_ERR_FROM_MERCURY;
     }
 
@@ -269,7 +268,6 @@ int mraft_io_impl_send(struct raft_io *io,
     if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could not create handle: margo_create returned %d", hret);
-        if(cb) cb(req, RAFT_CANCELED);
         return MRAFT_ERR_FROM_MERCURY;
     }
 
@@ -278,13 +276,12 @@ int mraft_io_impl_send(struct raft_io *io,
     if(hret != HG_SUCCESS && hret != HG_TIMEOUT) {
         margo_error(impl->mid,
             "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
-        if(cb) cb(req, RAFT_CANCELED);
         return MRAFT_ERR_FROM_MERCURY;
     }
 
     margo_destroy(h);
 
-    if(cb) cb(req, 0);
+    if(cb) cb(req, hret == HG_SUCCESS ? 0 : RAFT_CANCELED);
 
     return MRAFT_SUCCESS;
 }
