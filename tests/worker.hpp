@@ -180,7 +180,7 @@ static inline int runWorker(int fdToMaster, raft_id raftID, const WorkerOptions&
     }
 
     auto worker = new Worker{engine, raftID, std::move(log)};
-    engine.push_finalize_callback([worker](){ delete worker; });
+    engine.push_prefinalize_callback([worker](){ delete worker; });
 
     auto address = static_cast<std::string>(engine.self());
     address.resize(1024);
