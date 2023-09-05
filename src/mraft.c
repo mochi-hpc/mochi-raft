@@ -4,6 +4,7 @@
  * See COPYRIGHT in top-level directory.
  */
 #include "mochi-raft.h"
+#include "mraft-data.h"
 #include "mraft-io.h"
 #include "mraft-rpc.h"
 #include <margo.h>
@@ -72,9 +73,26 @@ int mraft_io_finalize(struct raft_io* raft_io)
     return MRAFT_SUCCESS;
 }
 
+int mraft_init(struct raft*     r,
+               struct raft_io*  io,
+               struct raft_fsm* fsm,
+               raft_id          id,
+               const char*      address)
+{
+    int ret = raft_init(r, io, fsm, id, address);
+    if(ret == 0) {
+        struct mraft_data* data = calloc(1, sizeof(*data));
+        ABT_mutex_create(&data->mutex);
+        r->data = (void*)data;
+    }
+    return ret;
+}
+
 void mraft_close(struct raft* r)
 {
     raft_close(r, NULL);
+    struct mraft_data* data = (struct mraft_data*)r->data;
+    ABT_mutex_free(&data->mutex);
 }
 
 #ifdef ENABLE_SSG

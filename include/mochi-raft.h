@@ -112,14 +112,11 @@ int mraft_io_set_rpc_timeout(struct raft_io* raft_io, double timeout_ms);
 /**
  * @see raft_init
  */
-static inline int mraft_init(struct raft*     r,
-                             struct raft_io*  io,
-                             struct raft_fsm* fsm,
-                             raft_id          id,
-                             const char*      address)
-{
-    return raft_init(r, io, fsm, id, address);
-}
+int mraft_init(struct raft*     r,
+               struct raft_io*  io,
+               struct raft_fsm* fsm,
+               raft_id          id,
+               const char*      address);
 
 /**
  * @brief Close the raft instance.
