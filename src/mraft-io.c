@@ -235,15 +235,28 @@ int mraft_io_impl_set_vote(struct raft_io *io, raft_id server_id)
     return (impl->log->set_vote)(impl->log, server_id);
 }
 
+struct send_ctx {
+    hg_handle_t          handle;
+    struct raft_io_send* req;
+};
+
+static void send_complete(void* u, hg_return_t hret)
+{
+    struct send_ctx* ctx = (struct send_ctx*)u;
+    margo_destroy(ctx->handle);
+    if(ctx->req->cb) (ctx->req->cb)(ctx->req, hret == HG_SUCCESS ? 0 : RAFT_CANCELED);
+
+}
+
 int mraft_io_impl_send(struct raft_io *io,
                        struct raft_io_send *req,
                        const struct raft_message *message,
                        raft_io_send_cb cb)
 {
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
-    hg_handle_t     h;
-    hg_return_t     hret;
-    hg_addr_t       addr = HG_ADDR_NULL;
+    hg_return_t           hret;
+    hg_addr_t             addr = HG_ADDR_NULL;
+    struct send_ctx*      send_ctx = NULL;
 
 #ifdef MRAFT_ENABLE_TESTS
     if(impl->simulate_dead)
@@ -268,24 +281,33 @@ int mraft_io_impl_send(struct raft_io *io,
         return MRAFT_ERR_FROM_MERCURY;
     }
 
-    hret = margo_create(impl->mid, addr, impl->craft_rpc_id, &h);
+    send_ctx = (struct send_ctx*)calloc(1, sizeof(*send_ctx));
+    send_ctx->req = req;
+
+    hret = margo_create(impl->mid, addr, impl->craft_rpc_id, &send_ctx->handle);
     if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could not create handle: margo_create returned %d", hret);
+        margo_addr_free(impl->mid, addr);
+        free(send_ctx);
         return MRAFT_ERR_FROM_MERCURY;
     }
 
-    hret = margo_provider_forward_timed(impl->provider_id, h, (void*)&in,
-                                        impl->craft_rpc_timeout_ms);
-    if(hret != HG_SUCCESS && hret != HG_TIMEOUT) {
+    hret = margo_provider_cforward_timed(impl->provider_id,
+                                         send_ctx->handle,
+                                         (void*)&in,
+                                         impl->craft_rpc_timeout_ms,
+                                         send_complete,
+                                         send_ctx);
+    if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
+        margo_addr_free(impl->mid, addr);
+        free(send_ctx);
         return MRAFT_ERR_FROM_MERCURY;
     }
 
-    margo_destroy(h);
-
-    if(cb) cb(req, hret == HG_SUCCESS ? 0 : RAFT_CANCELED);
+    margo_addr_free(impl->mid, addr);
 
     return MRAFT_SUCCESS;
 }
