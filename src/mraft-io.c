@@ -251,8 +251,8 @@ int mraft_io_impl_send(struct raft_io *io,
     in.server_address = impl->self_address;
 
     margo_trace(impl->mid,
-        "[mraft] Sending message of type %d to server id %lu (%s)",
-        in.type, in.server_id, in.server_address);
+        "[mraft] Sending message of type %d to server at address %s",
+        in.type, in.server_address);
 
     req->cb = cb;
 
