@@ -161,7 +161,7 @@ int mraft_apply(struct raft *r,
         ABT_eventual_wait(ev, (void**)&status);
         ret = *status;
         ABT_eventual_free(&ev);
-        return 0;
+        return ret;
     }
 
     raft_id     leader_id = 0;
@@ -247,7 +247,7 @@ int mraft_barrier(struct raft *r)
         ABT_eventual_wait(ev, (void**)&status);
         ret = *status;
         ABT_eventual_free(&ev);
-        return 0;
+        return ret;
     }
 
     raft_id     leader_id = 0;
@@ -330,7 +330,7 @@ int mraft_add(struct raft *r,
         ABT_eventual_wait(ev, (void**)&status);
         ret = *status;
         ABT_eventual_free(&ev);
-        return 0;
+        return ret;
     }
 
     raft_id     leader_id = 0;
@@ -412,7 +412,7 @@ int mraft_assign(struct raft *r,
         ABT_eventual_wait(ev, (void**)&status);
         ret = *status;
         ABT_eventual_free(&ev);
-        return 0;
+        return ret;
     }
 
     raft_id     leader_id = 0;
@@ -493,7 +493,7 @@ int mraft_remove(struct raft *r,
         ABT_eventual_wait(ev, (void**)&status);
         ret = *status;
         ABT_eventual_free(&ev);
-        return 0;
+        return ret;
     }
 
     raft_id     leader_id = 0;
