@@ -90,9 +90,12 @@ int mraft_init(struct raft*     r,
 
 void mraft_close(struct raft* r)
 {
+    raft_lock(r);
     raft_close(r, NULL);
+    raft_unlock(r);
     struct mraft_data* data = (struct mraft_data*)r->data;
     ABT_mutex_free(&data->mutex);
+    free(data);
 }
 
 #ifdef ENABLE_SSG
@@ -122,7 +125,9 @@ int mraft_bootstrap_from_ssg(struct raft* r,
         }
         raft_configuration_add(&conf, member_id, address, RAFT_VOTER);
     }
+    raft_lock(r);
     ret = raft_bootstrap(r, &conf);
+    raft_unlock(r);
     raft_configuration_close(&conf);
     return ret;
 error:
@@ -167,7 +172,9 @@ int mraft_apply(struct raft *r,
             memcpy(bufs_cpy[i].base, bufs[i].base, bufs_cpy[i].len);
         }
 
+        raft_lock(r);
         ret = raft_apply(r, &req, bufs_cpy, n, mraft_apply_cb);
+        raft_unlock(r);
         if(ret != 0) {
             ABT_eventual_free(&ev);
             for(unsigned i=0; i < n; i++) {
@@ -184,7 +191,9 @@ int mraft_apply(struct raft *r,
 
     raft_id     leader_id = 0;
     const char* leader_address = NULL;
+    raft_lock(r);
     raft_leader(r, &leader_id, &leader_address);
+    raft_unlock(r);
 
     if(leader_id == 0) return RAFT_LEADERSHIPLOST;
 
@@ -256,7 +265,9 @@ int mraft_barrier(struct raft *r)
         ABT_eventual ev = ABT_EVENTUAL_NULL;
         ABT_eventual_create(sizeof(int), &ev);
         req.data = (void*)ev;
+        raft_lock(r);
         ret = raft_barrier(r, &req, mraft_barrier_cb);
+        raft_unlock(r);
         if(ret != 0) {
             ABT_eventual_free(&ev);
             return ret;
@@ -270,7 +281,9 @@ int mraft_barrier(struct raft *r)
 
     raft_id     leader_id = 0;
     const char* leader_address = NULL;
+    raft_lock(r);
     raft_leader(r, &leader_id, &leader_address);
+    raft_unlock(r);
 
     if(leader_id == 0) return RAFT_LEADERSHIPLOST;
 
@@ -339,7 +352,9 @@ int mraft_add(struct raft *r,
         ABT_eventual ev = ABT_EVENTUAL_NULL;
         ABT_eventual_create(sizeof(int), &ev);
         req.data = (void*)ev;
+        raft_lock(r);
         ret = raft_add(r, &req, id, address, mraft_change_cb);
+        raft_unlock(r);
         if(ret != 0) {
             ABT_eventual_free(&ev);
             return ret;
@@ -353,7 +368,9 @@ int mraft_add(struct raft *r,
 
     raft_id     leader_id = 0;
     const char* leader_address = NULL;
+    raft_lock(r);
     raft_leader(r, &leader_id, &leader_address);
+    raft_unlock(r);
 
     if(leader_id == 0) return RAFT_LEADERSHIPLOST;
 
@@ -421,7 +438,9 @@ int mraft_assign(struct raft *r,
         ABT_eventual ev = ABT_EVENTUAL_NULL;
         ABT_eventual_create(sizeof(int), &ev);
         req.data = (void*)ev;
+        raft_lock(r);
         ret = raft_assign(r, &req, id, role, mraft_change_cb);
+        raft_unlock(r);
         if(ret != 0) {
             ABT_eventual_free(&ev);
             return ret;
@@ -435,7 +454,9 @@ int mraft_assign(struct raft *r,
 
     raft_id     leader_id = 0;
     const char* leader_address = NULL;
+    raft_lock(r);
     raft_leader(r, &leader_id, &leader_address);
+    raft_unlock(r);
 
     if(leader_id == 0) return RAFT_LEADERSHIPLOST;
 
@@ -502,7 +523,9 @@ int mraft_remove(struct raft *r,
         ABT_eventual ev = ABT_EVENTUAL_NULL;
         ABT_eventual_create(sizeof(int), &ev);
         req.data = (void*)ev;
+        raft_lock(r);
         ret = raft_remove(r, &req, id, mraft_change_cb);
+        raft_unlock(r);
         if(ret != 0) {
             ABT_eventual_free(&ev);
             return ret;
@@ -516,7 +539,9 @@ int mraft_remove(struct raft *r,
 
     raft_id     leader_id = 0;
     const char* leader_address = NULL;
+    raft_lock(r);
     raft_leader(r, &leader_id, &leader_address);
+    raft_unlock(r);
 
     if(leader_id == 0) return RAFT_LEADERSHIPLOST;
 
@@ -588,7 +613,9 @@ int mraft_transfer(struct raft *r,
         ABT_eventual ev = ABT_EVENTUAL_NULL;
         ABT_eventual_create(0, &ev);
         req.data = (void*)ev;
+        raft_lock(r);
         ret = raft_transfer(r, &req, id, mraft_transfer_cb);
+        raft_unlock(r);
         if(ret != 0) {
             ABT_eventual_free(&ev);
             return ret;
@@ -600,7 +627,9 @@ int mraft_transfer(struct raft *r,
 
     raft_id     leader_id = 0;
     const char* leader_address = NULL;
+    raft_lock(r);
     raft_leader(r, &leader_id, &leader_address);
+    raft_unlock(r);
 
     if(leader_id == 0) return RAFT_LEADERSHIPLOST;
 

@@ -4,6 +4,7 @@
  * See COPYRIGHT in top-level directory.
  */
 #include "mochi-raft.h"
+#include "mraft-data.h"
 #include "mraft-io.h"
 #include "mraft-rpc.h"
 #include <stdlib.h>
@@ -151,6 +152,7 @@ int mraft_io_impl_load(struct raft_io *io,
 static void ticker_ult(void* args)
 {
     struct raft_io* io = (struct raft_io*)args;
+    struct raft* r = (struct raft*)io->data;
     volatile struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Starting ticker ULT");
     raft_io_tick_cb tick = impl->tick_cb;
@@ -158,7 +160,9 @@ static void ticker_ult(void* args)
 #ifdef MRAFT_ENABLE_TESTS
         if(!impl->simulate_dead)
 #endif
+        raft_lock(r);
         tick(io);
+        raft_unlock(r);
         margo_thread_sleep(impl->mid, impl->tick_msec);
         tick = impl->tick_cb;
     }
@@ -444,6 +448,7 @@ static void mraft_craft_rpc_ult(hg_handle_t h)
     margo_instance_id mid = margo_hg_handle_get_instance(h);
     const struct hg_info* info = margo_get_info(h);
     struct raft_io* io = (struct raft_io*)margo_registered_data(mid, info->id);
+    struct raft* r = (struct raft*)io->data;
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
 
     hret = margo_get_input(h, &msg);
@@ -460,7 +465,9 @@ static void mraft_craft_rpc_ult(hg_handle_t h)
     if(!impl->simulate_dead)
 #endif
     if(recv_cb) {
+        raft_lock(r);
         recv_cb(io, &msg);
+        raft_unlock(r);
         // this change in the message is necessary because the callback
         // has already freed some fields but did not reset them
         switch(msg.type) {
