@@ -295,10 +295,14 @@ struct MasterContext : public std::enable_shared_from_this<MasterContext> {
     }
 
     bool remove(const WorkerHandle& w, WorkerHandle& target) const {
+        return remove(w, target.raftID);
+    }
+
+    bool remove(const WorkerHandle& w, raft_id target) const {
         auto mid = client->engine.get_margo_instance();
         ENSURE_WORKER_HANDLE_RUNNING(w, false);
         try {
-            CALL_RPC(remove, w, target.raftID, target.address);
+            CALL_RPC(remove, w, target);
         } CATCH_ERRORS(remove, false);
         return true;
     }

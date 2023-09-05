@@ -34,6 +34,18 @@ for i in range(0, 2):
 print("[python] Barrier")
 cluster[1].barrier()
 
+print("[python] Officially removing worker 3")
+cluster[1].remove(3)
+
+print("[python] Applying 2 more commands")
+for i in range(0, 2):
+    entry = f"entry_{i+5}"
+    cluster[i+1].apply(entry)
+    expected = expected + entry
+
+print("[python] Barrier")
+cluster[1].barrier()
+
 print("[python] Creating new worker with id 3")
 new_worker3 = cluster.spawn(3)
 assert new_worker3.raft_id == 3, "New worker's raft ID should be 3"

@@ -58,6 +58,9 @@ PYBIND11_EMBEDDED_MODULE(raft, m) {
         .def("remove", [](const WorkerHandle& w, WorkerHandle& toRemove) -> bool {
             return w.master.lock()->remove(w, toRemove);
         })
+        .def("remove", [](const WorkerHandle& w, raft_id id) -> bool {
+            return w.master.lock()->remove(w, id);
+        })
         .def("start", [](WorkerHandle& w) -> bool {
             return w.master.lock()->start(w);
         })
