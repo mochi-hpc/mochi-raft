@@ -16,6 +16,7 @@
 #include <pybind11/embed.h>
 
 namespace py = pybind11;
+using namespace pybind11::literals;
 namespace fs = std::filesystem;
 
 struct Options {
@@ -98,9 +99,9 @@ PYBIND11_EMBEDDED_MODULE(raft, m) {
             else
                 return nullptr;
         })
-        .def("spawn", [](MasterContext& master) -> std::shared_ptr<WorkerHandle> {
-            return master.spawnWorker();
-        });
+        .def("spawn", [](MasterContext& master, raft_id id) -> std::shared_ptr<WorkerHandle> {
+            return master.spawnWorker(id);
+        }, "id"_a=0);
 }
 
 // ----------------------------------------------------------------------------

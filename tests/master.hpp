@@ -198,14 +198,14 @@ struct MasterContext : public std::enable_shared_from_this<MasterContext> {
 
     struct CatchMeIfYouCan {};
 
-    std::shared_ptr<WorkerHandle> spawnWorker() {
+    std::shared_ptr<WorkerHandle> spawnWorker(raft_id id = 0) {
 
         int pipefd[2];
         if (pipe(pipefd) == -1) {
             perror("Pipe creation failed");
             return nullptr;
         }
-        auto raftID = cluster->nextRaftID++;
+        auto raftID = id != 0 ? id : cluster->nextRaftID++;
 
         // we need to temporarily destroy everything thallium-related
         // so that the child process does not inherit thems
@@ -214,7 +214,7 @@ struct MasterContext : public std::enable_shared_from_this<MasterContext> {
         pid_t pid = fork();
         if (pid < 0) {
             perror("Fork failed");
-            cluster->nextRaftID--;
+            if(id == 0) cluster->nextRaftID--;
             reinitializeClient();
             return nullptr;
 
