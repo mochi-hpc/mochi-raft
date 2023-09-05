@@ -142,7 +142,7 @@ int main(int argc, char** argv) {
         std::shared_ptr<WorkerHandle> w;
         try {
             w = master->spawnWorker();
-        } catch(MasterContext::CatchMeIfYouCan) {
+        } catch(const MasterContext::CatchMeIfYouCan&) {
             // prevent child from running master code when it leave worker code
             return 0;
         }

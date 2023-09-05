@@ -230,6 +230,7 @@ struct MasterContext : public std::enable_shared_from_this<MasterContext> {
             close(pipefd[1]);
             char address[1024];
             ssize_t bytes_read = read(pipefd[0], address, 1024);
+            (void)bytes_read;
             close(pipefd[0]);
 
             reinitializeClient();
