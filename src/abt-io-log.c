@@ -711,5 +711,5 @@ int mraft_abt_io_log_finalize(struct mraft_log* log)
     free(abtlog);
     memset(log, 0, sizeof(*log));
 
-    MRAFT_SUCCESS;
+    return MRAFT_SUCCESS;
 }

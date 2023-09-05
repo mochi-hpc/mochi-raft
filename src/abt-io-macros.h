@@ -7,6 +7,8 @@
 #ifndef ABT_IO_MACROS_H
 #define ABT_IO_MACROS_H
 
+#include <abt-io.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
