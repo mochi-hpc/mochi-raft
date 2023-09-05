@@ -124,6 +124,12 @@ class Raft {
          uint16_t          provider_id = 0,
          ABT_pool          pool        = ABT_POOL_NULL)
     {
+        memset(&m_raft_fsm, 0, sizeof(m_raft_fsm));
+        memset(&m_raft_log, 0, sizeof(m_raft_log));
+        memset(&m_raft_io, 0, sizeof(m_raft_io));
+        memset(&m_raft_tracer, 0, sizeof(m_raft_tracer));
+        memset(&m_raft, 0, sizeof(m_raft));
+
         int         ret;
         hg_return_t hret;
 
