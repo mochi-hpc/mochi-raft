@@ -244,7 +244,8 @@ static void send_complete(void* u, hg_return_t hret)
 {
     struct send_ctx* ctx = (struct send_ctx*)u;
     margo_destroy(ctx->handle);
-    if(ctx->req->cb) (ctx->req->cb)(ctx->req, hret == HG_SUCCESS ? 0 : RAFT_CANCELED);
+    int status = (hret == HG_SUCCESS || hret == HG_TIMEOUT) ? 0 : RAFT_CANCELED;
+    if(ctx->req->cb) (ctx->req->cb)(ctx->req, status);
 
 }
 

@@ -1,6 +1,6 @@
 # This test applies 10 entries to the state machine,
 # performs a barrier, then checks the content of the
-# state machine. This test is meant to force the abt-io 
+# state machine. This test is meant to force the abt-io
 # log backend to create a second entry file (entry files
 # are limited to 1MB by default).
 from raft import cluster
@@ -15,7 +15,7 @@ def generate_random_string(n):
 
 expected = ""
 for i in range(0, 10):
-    entry = generate_random_string(20*1024) # 20 KB entry
+    entry = generate_random_string(200*1024) # 200 KB entry
     cluster[(i % 3) + 1].apply(entry)
     expected = expected + entry
 
