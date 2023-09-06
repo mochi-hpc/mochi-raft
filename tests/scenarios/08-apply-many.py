@@ -9,7 +9,7 @@ import time
 
 def generate_random_string(n):
     import random
-    letters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    letters = list('0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ')
     random_string = ''.join(random.choice(letters) for _ in range(n))
     return random_string
 

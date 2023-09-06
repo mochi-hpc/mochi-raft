@@ -198,6 +198,7 @@ int main(int argc, char** argv) {
             if(currentPID != masterPID) return 0;
             auto mid = master->client->engine.get_margo_instance();
             margo_error(mid, "[master] python error: %s", e.what());
+            ret = 1;
         }
     }
 

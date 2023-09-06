@@ -57,7 +57,7 @@ print("[python] Adding the new worker 3 to the cluster")
 cluster[1].add(new_worker3)
 
 print("[python] Assigning the new worker 3 as voter")
-cluster[1].assign(new_worker, raft.VOTER)
+cluster[1].assign(new_worker3, raft.VOTER)
 
 print("[python] Sleeping for 2 seconds")
 time.sleep(2)
