@@ -5,12 +5,12 @@
 # are limited to 1MB by default).
 from raft import cluster
 import time
-import random
-import string
+
 
 def generate_random_string(n):
-    characters = string.printable
-    random_string = ''.join(random.choice(characters) for _ in range(n))
+    import random
+    letters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    random_string = ''.join(random.choice(letters) for _ in range(n))
     return random_string
 
 expected = ""

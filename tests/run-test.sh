@@ -18,7 +18,8 @@ timeout 60 ./mraft-py-test na+sm \
 RET=$?
 
 if [ "$RET" -eq "0" ]; then
-    rm -rf $STORAGE
+    echo $RET
+#    rm -rf $STORAGE
 fi
 
 exit $RET
