@@ -28,6 +28,7 @@ struct Options {
     std::string       logPath;
     std::string       logType;
     std::string       tracePath;
+    size_t            heartbeatTimeoutMs;
 };
 
 static void parseCommandLine(int argc, char** argv, Options& options);
@@ -120,11 +121,12 @@ int main(int argc, char** argv) {
     masterOptions.logLevel = options.masterLogLevel;
 
     WorkerOptions workerOptions;
-    workerOptions.protocol  = options.protocol;
-    workerOptions.logLevel  = options.workerLogLevel;
-    workerOptions.logPath   = options.logPath;
-    workerOptions.logType   = options.logType;
-    workerOptions.tracePath = options.tracePath;
+    workerOptions.protocol           = options.protocol;
+    workerOptions.logLevel           = options.workerLogLevel;
+    workerOptions.logPath            = options.logPath;
+    workerOptions.logType            = options.logType;
+    workerOptions.tracePath          = options.tracePath;
+    workerOptions.heartbeatTimeoutMs = options.heartbeatTimeoutMs;
 
     auto master = std::make_shared<MasterContext>(masterOptions, workerOptions);
 
@@ -248,6 +250,9 @@ static void parseCommandLine(int argc, char** argv, Options& options) {
         TCLAP::ValueArg<std::string> logType(
                 "l", "log-type", "Type of log to use (\"abt-io\" or \"memory\")", false,
                 "abt-io", "type");
+        TCLAP::ValueArg<size_t> heartbeatTimeoutMs(
+                "m", "heartbeat-period", "Heartbeat period in milliseconds",
+                false, 100, "milliseconds");
 
         cmd.add(protocol);
         cmd.add(masterLogLevel);
@@ -257,6 +262,7 @@ static void parseCommandLine(int argc, char** argv, Options& options) {
         cmd.add(logPath);
         cmd.add(logType);
         cmd.add(tracePath);
+        cmd.add(heartbeatTimeoutMs);
         cmd.parse(argc, argv);
 
         static std::unordered_map<std::string, tl::logger::level> logLevelMap = {
@@ -269,12 +275,13 @@ static void parseCommandLine(int argc, char** argv, Options& options) {
             {"off",      tl::logger::level::critical}
         };
 
-        options.protocol        = protocol.getValue();
-        options.pythonFile      = pythonFile.getValue();
-        options.initClusterSize = clusterSize.getValue();
-        options.logPath         = logPath.getValue();
-        options.logType         = logType.getValue();
-        options.tracePath       = tracePath.getValue();
+        options.protocol           = protocol.getValue();
+        options.pythonFile         = pythonFile.getValue();
+        options.initClusterSize    = clusterSize.getValue();
+        options.logPath            = logPath.getValue();
+        options.logType            = logType.getValue();
+        options.tracePath          = tracePath.getValue();
+        options.heartbeatTimeoutMs = heartbeatTimeoutMs.getValue();
         if(logLevelMap.count(masterLogLevel.getValue()))
             options.masterLogLevel = logLevelMap[masterLogLevel.getValue()];
         else
