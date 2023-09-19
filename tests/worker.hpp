@@ -17,6 +17,7 @@ struct WorkerOptions {
     std::string       logPath;
     std::string       logType;
     std::string       tracePath;
+    size_t            heartbeatTimeoutMs;
 };
 
 struct FSM : public mraft::StateMachine {
@@ -46,12 +47,13 @@ struct FSM : public mraft::StateMachine {
 
 struct Worker : public tl::provider<Worker> {
 
-    Worker(tl::engine engine, raft_id raftID, std::unique_ptr<mraft::Log> theLog)
+    Worker(tl::engine engine, raft_id raftID, std::unique_ptr<mraft::Log> theLog, size_t hbTimeout = 100)
     : tl::provider<Worker>(engine, 0)
     , fsm{}
     , log{std::move(theLog)}
     , raft{engine.get_margo_instance(), raftID, fsm, *log}
     , id{raftID} {
+        raft.set_heartbeat_timeout(hbTimeout);
         #define DEFINE_WORKER_RPC(__rpc__) define("mraft_test_" #__rpc__, &Worker::__rpc__)
         DEFINE_WORKER_RPC(bootstrap);
         DEFINE_WORKER_RPC(start);
@@ -179,7 +181,7 @@ static inline int runWorker(int fdToMaster, raft_id raftID, const WorkerOptions&
         log = std::make_unique<mraft::MemoryLog>();
     }
 
-    auto worker = new Worker{engine, raftID, std::move(log)};
+    auto worker = new Worker{engine, raftID, std::move(log), options.heartbeatTimeoutMs};
     engine.push_prefinalize_callback([worker](){ delete worker; });
 
     auto address = static_cast<std::string>(engine.self());
