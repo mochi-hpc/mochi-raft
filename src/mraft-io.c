@@ -157,13 +157,17 @@ static void ticker_ult(void* args)
     margo_trace(impl->mid, "[mraft] Starting ticker ULT");
     raft_io_tick_cb tick = impl->tick_cb;
     while(tick) {
+        double t1 = ABT_get_wtime();
+        raft_lock(r);
 #ifdef MRAFT_ENABLE_TESTS
         if(!impl->simulate_dead)
 #endif
-        raft_lock(r);
         tick(io);
         raft_unlock(r);
-        margo_thread_sleep(impl->mid, impl->tick_msec);
+        double t2 = ABT_get_wtime();
+        double tick_duration_msec = (t2 - t1)*1000;
+        if(tick_duration_msec < impl->tick_msec)
+            margo_thread_sleep(impl->mid, impl->tick_msec);
         tick = impl->tick_cb;
     }
 }
