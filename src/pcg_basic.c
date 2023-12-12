@@ -1,3 +1,4 @@
+// LCOV_EXCL_START
 /*
  * PCG Random Number Generation for C.
  *
@@ -113,4 +114,4 @@ uint32_t pcg32_boundedrand(uint32_t bound)
 {
     return pcg32_boundedrand_r(&pcg32_global, bound);
 }
-
+// LCOV_EXCL_STOP

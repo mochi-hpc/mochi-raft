@@ -4,6 +4,7 @@
  * See COPYRIGHT in top-level directory.
  */
 #include "mochi-raft.h"
+#include "mraft-data.h"
 #include "mraft-io.h"
 #include "mraft-rpc.h"
 #include <stdlib.h>
@@ -151,15 +152,22 @@ int mraft_io_impl_load(struct raft_io *io,
 static void ticker_ult(void* args)
 {
     struct raft_io* io = (struct raft_io*)args;
-    struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
+    struct raft* r = (struct raft*)io->data;
+    volatile struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Starting ticker ULT");
     raft_io_tick_cb tick = impl->tick_cb;
     while(tick) {
+        double t1 = ABT_get_wtime();
+        raft_lock(r);
 #ifdef MRAFT_ENABLE_TESTS
         if(!impl->simulate_dead)
 #endif
         tick(io);
-        margo_thread_sleep(impl->mid, impl->tick_msec);
+        raft_unlock(r);
+        double t2 = ABT_get_wtime();
+        double tick_duration_msec = (t2 - t1)*1000;
+        if(tick_duration_msec < impl->tick_msec)
+            margo_thread_sleep(impl->mid, impl->tick_msec);
         tick = impl->tick_cb;
     }
 }
@@ -184,8 +192,10 @@ int mraft_io_impl_bootstrap(struct raft_io *io, const struct raft_configuration 
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Boostrapping raft cluster");
     if(!impl->log->bootstrap) {
+        // LCOV_EXCL_START
         margo_error(impl->mid, "[mraft] bootstrap function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
+        // LCOV_EXCL_STOP
     }
     return (impl->log->bootstrap)(impl->log, conf);
 }
@@ -195,8 +205,10 @@ int mraft_io_impl_recover(struct raft_io *io, const struct raft_configuration *c
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Recovering raft cluster");
     if(!impl->log->recover) {
+        // LCOV_EXCL_START
         margo_error(impl->mid, "[mraft] recover function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
+        // LCOV_EXCL_STOP
     }
     return (impl->log->recover)(impl->log, conf);
 }
@@ -206,8 +218,10 @@ int mraft_io_impl_set_term(struct raft_io *io, raft_term term)
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Setting term to %lu", term);
     if(!impl->log->set_term) {
+        // LCOV_EXCL_START
         margo_error(impl->mid, "[mraft] set_term function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
+        // LCOV_EXCL_STOP
     }
     return (impl->log->set_term)(impl->log, term);
 }
@@ -217,10 +231,26 @@ int mraft_io_impl_set_vote(struct raft_io *io, raft_id server_id)
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
     margo_trace(impl->mid, "[mraft] Setting vote to %lu", server_id);
     if(!impl->log->set_vote) {
+        // LCOV_EXCL_START
         margo_error(impl->mid, "[mraft] set_vote function in mraft_log structure not implemented");
         return RAFT_NOTFOUND;
+        // LCOV_EXCL_STOP
     }
     return (impl->log->set_vote)(impl->log, server_id);
+}
+
+struct send_ctx {
+    hg_handle_t          handle;
+    struct raft_io_send* req;
+};
+
+static void send_complete(void* u, hg_return_t hret)
+{
+    struct send_ctx* ctx = (struct send_ctx*)u;
+    margo_destroy(ctx->handle);
+    int status = (hret == HG_SUCCESS || hret == HG_TIMEOUT) ? 0 : RAFT_CANCELED;
+    if(ctx->req->cb) (ctx->req->cb)(ctx->req, status);
+
 }
 
 int mraft_io_impl_send(struct raft_io *io,
@@ -229,9 +259,9 @@ int mraft_io_impl_send(struct raft_io *io,
                        raft_io_send_cb cb)
 {
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
-    hg_handle_t     h;
-    hg_return_t     hret;
-    hg_addr_t       addr = HG_ADDR_NULL;
+    hg_return_t           hret;
+    hg_addr_t             addr = HG_ADDR_NULL;
+    struct send_ctx*      send_ctx = NULL;
 
 #ifdef MRAFT_ENABLE_TESTS
     if(impl->simulate_dead)
@@ -243,8 +273,8 @@ int mraft_io_impl_send(struct raft_io *io,
     in.server_address = impl->self_address;
 
     margo_trace(impl->mid,
-        "[mraft] Sending message of type %d to server id %lu (%s)",
-        in.type, in.server_id, in.server_address);
+        "[mraft] Sending message of type %d to server at address %s",
+        in.type, in.server_address);
 
     req->cb = cb;
 
@@ -253,30 +283,36 @@ int mraft_io_impl_send(struct raft_io *io,
         margo_error(impl->mid,
             "[mraft] Could not resolve address %s: margo_addr_lookup returned %d",
             message->server_address, hret);
-        if(cb) cb(req, RAFT_CANCELED);
         return MRAFT_ERR_FROM_MERCURY;
     }
 
-    hret = margo_create(impl->mid, addr, impl->craft_rpc_id, &h);
+    send_ctx = (struct send_ctx*)calloc(1, sizeof(*send_ctx));
+    send_ctx->req = req;
+
+    hret = margo_create(impl->mid, addr, impl->craft_rpc_id, &send_ctx->handle);
     if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could not create handle: margo_create returned %d", hret);
-        if(cb) cb(req, RAFT_CANCELED);
+        margo_addr_free(impl->mid, addr);
+        free(send_ctx);
         return MRAFT_ERR_FROM_MERCURY;
     }
 
-    hret = margo_provider_forward_timed(impl->provider_id, h, (void*)&in,
-                                        impl->craft_rpc_timeout_ms);
-    if(hret != HG_SUCCESS && hret != HG_TIMEOUT) {
+    hret = margo_provider_cforward_timed(impl->provider_id,
+                                         send_ctx->handle,
+                                         (void*)&in,
+                                         impl->craft_rpc_timeout_ms,
+                                         send_complete,
+                                         send_ctx);
+    if(hret != HG_SUCCESS) {
         margo_error(impl->mid,
             "[mraft] Could forward handle: margo_provider_forward returned %d", hret);
-        if(cb) cb(req, RAFT_CANCELED);
+        margo_addr_free(impl->mid, addr);
+        free(send_ctx);
         return MRAFT_ERR_FROM_MERCURY;
     }
 
-    margo_destroy(h);
-
-    if(cb) cb(req, 0);
+    margo_addr_free(impl->mid, addr);
 
     return MRAFT_SUCCESS;
 }
@@ -439,6 +475,7 @@ static void mraft_craft_rpc_ult(hg_handle_t h)
     margo_instance_id mid = margo_hg_handle_get_instance(h);
     const struct hg_info* info = margo_get_info(h);
     struct raft_io* io = (struct raft_io*)margo_registered_data(mid, info->id);
+    struct raft* r = (struct raft*)io->data;
     struct mraft_io_impl* impl = (struct mraft_io_impl*)io->impl;
 
     hret = margo_get_input(h, &msg);
@@ -455,7 +492,9 @@ static void mraft_craft_rpc_ult(hg_handle_t h)
     if(!impl->simulate_dead)
 #endif
     if(recv_cb) {
+        raft_lock(r);
         recv_cb(io, &msg);
+        raft_unlock(r);
         // this change in the message is necessary because the callback
         // has already freed some fields but did not reset them
         switch(msg.type) {

@@ -27,7 +27,8 @@ target_link_libraries (mochi-raft
            PkgConfig::RAFT
            ${OPTIONAL_SSG}
            PkgConfig::JSONC
-    PRIVATE coverage_config)
+    PRIVATE coverage_config
+            asan_config)
 target_include_directories (mochi-raft PUBLIC $<INSTALL_INTERFACE:include>)
 target_include_directories (mochi-raft BEFORE PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)

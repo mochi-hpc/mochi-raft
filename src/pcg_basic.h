@@ -1,3 +1,4 @@
+// LCOV_EXCL_START
 /*
  * PCG Random Number Generation for C.
  *
@@ -76,3 +77,4 @@ uint32_t pcg32_boundedrand_r(pcg32_random_t* rng, uint32_t bound);
 #endif
 
 #endif // PCG_BASIC_H_INCLUDED
+// LCOV_EXCL_STOP

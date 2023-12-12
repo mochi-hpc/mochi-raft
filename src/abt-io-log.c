@@ -12,14 +12,13 @@
 #include "abt-io-macros.h"
 #include "abt-io-log-helpers.h"
 
-#define ENTRY_FILE_MAX_SIZE (128 * 1024)
-
 struct abt_io_log {
     raft_id            id;
     char*              path;
     abt_io_instance_id aid;
     margo_instance_id  mid;
     bool               owns_aid;
+    size_t             max_entry_file_size;
 };
 
 static int abt_io_log_load(struct mraft_log*      log,
@@ -198,7 +197,7 @@ static int abt_io_log_append(struct mraft_log*       log,
         const off_t entry_size
             = sizeof(entries[i].term) + sizeof(entries[i].type)
             + sizeof(entries[i].buf.len) + entries[i].buf.len;
-        if (offset + entry_size > ENTRY_FILE_MAX_SIZE) {
+        if (offset + entry_size > abtlog->max_entry_file_size) {
             /* Size exceeded */
             /* Close old entry file */
             ABT_IO_CLOSE(abtlog->aid, entry_fd);
@@ -649,13 +648,14 @@ int mraft_abt_io_log_init(struct mraft_log* log, raft_id id, mraft_abt_io_log_ar
     SET_FUNCTION(snapshot_get);
 #undef SET_FUNCTION
 
-    struct abt_io_log* abtlog = calloc(1, sizeof(*abtlog));
-    abtlog->aid               = aid;
-    abtlog->id                = id;
-    abtlog->mid               = mid;
-    abtlog->owns_aid          = owns_aid;
-    abtlog->path              = path;
-    log->data                 = abtlog;
+    struct abt_io_log* abtlog   = calloc(1, sizeof(*abtlog));
+    abtlog->aid                 = aid;
+    abtlog->id                  = id;
+    abtlog->mid                 = mid;
+    abtlog->owns_aid            = owns_aid;
+    abtlog->path                = path;
+    abtlog->max_entry_file_size = max_entry_file_size;
+    log->data                   = abtlog;
 
     /* Create each of the files if not already done */
     int    fd;
@@ -708,8 +708,10 @@ int mraft_abt_io_log_finalize(struct mraft_log* log)
     if(abtlog->owns_aid)
         abt_io_finalize(abtlog->aid);
 
+    free(abtlog->path);
+
     free(abtlog);
     memset(log, 0, sizeof(*log));
 
-    MRAFT_SUCCESS;
+    return MRAFT_SUCCESS;
 }
