@@ -206,7 +206,7 @@ private:
     std::unique_ptr<Network> network_;
     std::unique_ptr<EventQueue> queue_;
 
-    ABT_thread loop_thread_ = ABT_THREAD_NULL;
+    tl::managed<tl::thread> loop_thread_;
     std::atomic<bool> running_{false};
 
     raft_index last_applied_ = 0; ///< Tracks the last log index applied to the FSM.

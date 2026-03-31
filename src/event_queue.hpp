@@ -4,12 +4,14 @@ extern "C" {
 #include <raft.h>
 }
 
-#include <abt.h>
+#include <thallium.hpp>
 #include <deque>
 #include <optional>
 #include <cstdint>
 #include <memory>
 #include <cstring>
+
+namespace tl = thallium;
 
 namespace mraft {
 
@@ -29,11 +31,11 @@ struct OwnedEvent {
 };
 
 // Thread-safe event queue for raft events.
-// Uses Argobots mutex + condition variable for efficient blocking.
+// Uses Thallium mutex + condition variable for efficient blocking.
 class EventQueue {
 public:
-    EventQueue();
-    ~EventQueue();
+    EventQueue() = default;
+    ~EventQueue() = default;
 
     // Push an event to the back of the queue. Wakes up any waiting pop().
     void push(const struct raft_event& event);
@@ -47,8 +49,8 @@ public:
     std::unique_ptr<OwnedEvent> pop(double timeout_ms);
 
 private:
-    ABT_mutex mutex_ = ABT_MUTEX_NULL;
-    ABT_cond cond_ = ABT_COND_NULL;
+    tl::mutex mutex_;
+    tl::condition_variable cond_;
     std::deque<std::unique_ptr<OwnedEvent>> queue_;
 };
 

@@ -7,7 +7,11 @@ extern "C" {
 #include <abt.h>
 }
 
+#include <thallium.hpp>
+
 #include "../src/event_queue.hpp"
+
+namespace tl = thallium;
 
 class EventQueueTest : public ::testing::Test {
 protected:
@@ -66,21 +70,14 @@ TEST_F(EventQueueTest, PopTimesOut) {
 TEST_F(EventQueueTest, PushWakesUpPop) {
     mraft::EventQueue q;
 
-    ABT_xstream xstream;
-    ABT_xstream_create(ABT_SCHED_NULL, &xstream);
-    ABT_pool pool;
-    ABT_xstream_get_main_pools(xstream, 1, &pool);
+    auto xstream = tl::xstream::create();
+    auto pool = xstream->get_main_pools(1)[0];
 
-    ABT_thread thread;
-    ABT_thread_create(
-        pool,
-        [](void* arg) {
-            auto* queue = static_cast<mraft::EventQueue*>(arg);
-            struct timespec ts = {0, 50000000}; // 50ms
-            nanosleep(&ts, nullptr);
-            queue->push(make_timeout_event(42));
-        },
-        &q, ABT_THREAD_ATTR_NULL, &thread);
+    auto t = pool.make_thread([&q]() {
+        struct timespec ts = {0, 50000000}; // 50ms
+        nanosleep(&ts, nullptr);
+        q.push(make_timeout_event(42));
+    });
 
     auto start = std::chrono::steady_clock::now();
     auto e = q.pop(5000); // 5 second timeout
@@ -93,9 +90,8 @@ TEST_F(EventQueueTest, PushWakesUpPop) {
                   .count();
     EXPECT_LT(ms, 2000);
 
-    ABT_thread_free(&thread);
-    ABT_xstream_join(xstream);
-    ABT_xstream_free(&xstream);
+    t = tl::managed<tl::thread>(); // release thread
+    xstream->join();
 }
 
 int main(int argc, char** argv) {

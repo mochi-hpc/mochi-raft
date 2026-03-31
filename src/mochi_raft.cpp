@@ -115,14 +115,8 @@ int MochiRaftServer::start() {
     // Start the event loop on the engine's handler pool
     running_.store(true);
 
-    ABT_pool pool = engine_.get_handler_pool().native_handle();
-
-    ABT_thread_create(
-        pool,
-        [](void* arg) {
-            static_cast<MochiRaftServer*>(arg)->event_loop();
-        },
-        this, ABT_THREAD_ATTR_NULL, &loop_thread_);
+    loop_thread_ = engine_.get_handler_pool().make_thread(
+        [this]() { event_loop(); });
 
     return 0;
 }
@@ -138,11 +132,8 @@ void MochiRaftServer::shutdown() {
     wake.time = now_ms();
     queue_->push(wake);
 
-    if (loop_thread_ != ABT_THREAD_NULL) {
-        ABT_thread_join(loop_thread_);
-        ABT_thread_free(&loop_thread_);
-        loop_thread_ = ABT_THREAD_NULL;
-    }
+    loop_thread_->join();
+    loop_thread_ = tl::managed<tl::thread>();
 
     raft_close(&raft_, NULL);
 }
