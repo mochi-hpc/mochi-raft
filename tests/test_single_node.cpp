@@ -7,18 +7,18 @@
 
 extern "C" {
 #include <raft.h>
-#include <abt.h>
-#include <abt-io.h>
 }
 
+#include <abt.h>
+#include <abt-io.h>
 #include <thallium.hpp>
 
-#include "../include/mochi-raft/mochi_raft.hpp"
+#include "../include/mochi-raft.hpp"
 
 namespace tl = thallium;
 namespace fs = std::filesystem;
 
-class NoOpFsm : public mochi_raft::Fsm {
+class NoOpFsm : public mraft::Fsm {
 public:
     int apply(const struct raft_buffer& buf) override {
         applied_count_.fetch_add(1);
@@ -62,7 +62,7 @@ protected:
     abt_io_instance_id abt_io_ = ABT_IO_INSTANCE_NULL;
     std::unique_ptr<tl::engine> engine_;
     std::string address_;
-    std::unique_ptr<mochi_raft::MochiRaftServer> server_;
+    std::unique_ptr<mraft::MochiRaftServer> server_;
     NoOpFsm fsm_;
 };
 
@@ -75,7 +75,7 @@ static void yield_ms(int ms) {
 }
 
 TEST_F(SingleNodeTest, BootstrapStartAndBecomeLeader) {
-    server_ = std::make_unique<mochi_raft::MochiRaftServer>(
+    server_ = std::make_unique<mraft::MochiRaftServer>(
         *engine_, abt_io_, 1, address_, test_dir_, fsm_);
 
     // Bootstrap with single server
@@ -100,7 +100,7 @@ TEST_F(SingleNodeTest, BootstrapStartAndBecomeLeader) {
 }
 
 TEST_F(SingleNodeTest, SubmitEntry) {
-    server_ = std::make_unique<mochi_raft::MochiRaftServer>(
+    server_ = std::make_unique<mraft::MochiRaftServer>(
         *engine_, abt_io_, 1, address_, test_dir_, fsm_);
 
     ASSERT_EQ(server_->bootstrap({{1, address_}}), 0);

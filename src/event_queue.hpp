@@ -2,16 +2,16 @@
 
 extern "C" {
 #include <raft.h>
-#include <abt.h>
 }
 
+#include <abt.h>
 #include <deque>
 #include <optional>
 #include <cstdint>
 #include <memory>
 #include <cstring>
 
-namespace mochi_raft {
+namespace mraft {
 
 // Wraps a raft_event along with any heap-allocated data it references.
 // For RAFT_SUBMIT events, owns the entry and its buffer data.
@@ -52,4 +52,4 @@ private:
     std::deque<std::unique_ptr<OwnedEvent>> queue_;
 };
 
-} // namespace mochi_raft
+} // namespace mraft

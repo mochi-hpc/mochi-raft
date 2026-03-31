@@ -7,13 +7,13 @@
 
 extern "C" {
 #include <raft.h>
-#include <abt.h>
-#include <abt-io.h>
 }
 
+#include <abt.h>
+#include <abt-io.h>
 #include <thallium.hpp>
 
-#include "../include/mochi-raft/mochi_raft.hpp"
+#include "../include/mochi-raft.hpp"
 
 namespace tl = thallium;
 namespace fs = std::filesystem;
@@ -26,7 +26,7 @@ static void yield_ms(int ms) {
     }
 }
 
-class NoOpFsm : public mochi_raft::Fsm {
+class NoOpFsm : public mraft::Fsm {
 public:
     int apply(const struct raft_buffer& buf) override {
         applied_count_.fetch_add(1);
@@ -83,7 +83,7 @@ protected:
         }
 
         for (int i = 0; i < N; i++) {
-            servers_[i] = std::make_unique<mochi_raft::MochiRaftServer>(
+            servers_[i] = std::make_unique<mraft::MochiRaftServer>(
                 *engines_[i], abt_io_, static_cast<raft_id>(i + 1),
                 addrs_[i], dirs_[i], fsms_[i]);
         }
@@ -117,7 +117,7 @@ protected:
     abt_io_instance_id abt_io_ = ABT_IO_INSTANCE_NULL;
     std::unique_ptr<tl::engine> engines_[N];
     std::string addrs_[N];
-    std::unique_ptr<mochi_raft::MochiRaftServer> servers_[N];
+    std::unique_ptr<mraft::MochiRaftServer> servers_[N];
     NoOpFsm fsms_[N];
 };
 
@@ -204,7 +204,7 @@ TEST_F(ClusterTest, IsolateLeaderNewElection) {
     ASSERT_GE(old_leader, 0);
 
     // Isolate the leader (both directions)
-    servers_[old_leader]->set_isolation(mochi_raft::IsolationMode::BOTH);
+    servers_[old_leader]->set_isolation(mraft::IsolationMode::BOTH);
 
     // Wait for a new leader to emerge among the remaining nodes
     auto deadline = std::chrono::steady_clock::now() +
@@ -226,7 +226,7 @@ TEST_F(ClusterTest, IsolateLeaderNewElection) {
     EXPECT_NE(new_leader, old_leader);
 
     // Deisolate the old leader — it should rejoin as follower
-    servers_[old_leader]->set_isolation(mochi_raft::IsolationMode::NONE);
+    servers_[old_leader]->set_isolation(mraft::IsolationMode::NONE);
 
     deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (std::chrono::steady_clock::now() < deadline) {

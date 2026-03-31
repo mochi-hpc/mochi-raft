@@ -7,12 +7,12 @@
 
 extern "C" {
 #include <raft.h>
-#include <abt.h>
-#include <abt-io.h>
 }
 
+#include <abt.h>
+#include <abt-io.h>
 #include <thallium.hpp>
-#include <mochi-raft/mochi_raft.hpp>
+#include <mochi-raft.hpp>
 
 #include "kv_fsm.hpp"
 #include "pipe_protocol.hpp"
@@ -42,7 +42,7 @@ int main() {
     WorkerState state = WorkerState::UNINITIALIZED;
     std::unique_ptr<tl::engine> engine;
     abt_io_instance_id abt_io = ABT_IO_INSTANCE_NULL;
-    std::unique_ptr<mochi_raft::MochiRaftServer> server;
+    std::unique_ptr<mraft::MochiRaftServer> server;
     KeyValueFsm fsm;
     raft_id my_id = 0;
     std::string my_address;
@@ -112,7 +112,7 @@ int main() {
             }
 
             // Create server
-            server = std::make_unique<mochi_raft::MochiRaftServer>(
+            server = std::make_unique<mraft::MochiRaftServer>(
                 *engine, abt_io, my_id, my_address, data_dir, fsm);
 
             int rv = server->bootstrap(cluster);
@@ -221,14 +221,14 @@ int main() {
                 continue;
             }
 
-            mochi_raft::IsolationMode mode = mochi_raft::IsolationMode::BOTH;
+            mraft::IsolationMode mode = mraft::IsolationMode::BOTH;
             if (tokens.size() >= 2) {
                 if (tokens[1] == "inbound") {
-                    mode = mochi_raft::IsolationMode::INBOUND;
+                    mode = mraft::IsolationMode::INBOUND;
                 } else if (tokens[1] == "outbound") {
-                    mode = mochi_raft::IsolationMode::OUTBOUND;
+                    mode = mraft::IsolationMode::OUTBOUND;
                 } else if (tokens[1] == "both") {
-                    mode = mochi_raft::IsolationMode::BOTH;
+                    mode = mraft::IsolationMode::BOTH;
                 }
             }
 
@@ -240,7 +240,7 @@ int main() {
                 respond(proto::err("not running"));
                 continue;
             }
-            server->set_isolation(mochi_raft::IsolationMode::NONE);
+            server->set_isolation(mraft::IsolationMode::NONE);
             respond(proto::ok());
 
         } else if (cmd == "TRANSFER") {

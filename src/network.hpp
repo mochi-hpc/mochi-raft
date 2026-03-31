@@ -15,11 +15,11 @@ extern "C" {
 #include <atomic>
 #include <string>
 
-#include "mochi-raft/mochi_raft.hpp"
+#include "mochi-raft.hpp"
 
 namespace tl = thallium;
 
-namespace mochi_raft {
+namespace mraft {
 
 class Network : public tl::provider<Network> {
 public:
@@ -59,4 +59,4 @@ private:
     std::atomic<uint8_t> isolation_{0};
 };
 
-} // namespace mochi_raft
+} // namespace mraft

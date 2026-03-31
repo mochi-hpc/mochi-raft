@@ -10,7 +10,7 @@ extern "C" {
 
 #include "../src/serialization.hpp"
 
-using namespace mochi_raft;
+using namespace mraft;
 
 // Round-trip helper: serialize then deserialize a MessageData
 static MessageData round_trip(const MessageData& in) {

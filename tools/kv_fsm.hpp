@@ -1,6 +1,6 @@
 #pragma once
 
-#include <mochi-raft/mochi_raft.hpp>
+#include <mochi-raft.hpp>
 
 #include <map>
 #include <string>
@@ -10,7 +10,7 @@
 
 // Key-value FSM for CLI testing.
 // Entries are "PUT <key> <value>" strings.
-class KeyValueFsm : public mochi_raft::Fsm {
+class KeyValueFsm : public mraft::Fsm {
 public:
     int apply(const struct raft_buffer& buf) override {
         std::string cmd(static_cast<const char*>(buf.base), buf.len);

@@ -14,7 +14,7 @@ extern "C" {
 
 namespace tl = thallium;
 
-namespace mochi_raft {
+namespace mraft {
 
 // Network isolation modes for testing/simulation
 enum class IsolationMode : uint8_t {

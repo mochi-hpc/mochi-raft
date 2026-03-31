@@ -24,7 +24,7 @@ static struct raft_event make_timeout_event(raft_time time) {
 }
 
 TEST_F(EventQueueTest, PushAndPop) {
-    mochi_raft::EventQueue q;
+    mraft::EventQueue q;
 
     q.push(make_timeout_event(100));
     q.push(make_timeout_event(200));
@@ -45,13 +45,13 @@ TEST_F(EventQueueTest, PushAndPop) {
 }
 
 TEST_F(EventQueueTest, PopEmptyNonBlocking) {
-    mochi_raft::EventQueue q;
+    mraft::EventQueue q;
     auto e = q.pop(0);
     EXPECT_EQ(e, nullptr);
 }
 
 TEST_F(EventQueueTest, PopTimesOut) {
-    mochi_raft::EventQueue q;
+    mraft::EventQueue q;
 
     auto start = std::chrono::steady_clock::now();
     auto e = q.pop(100); // 100ms timeout
@@ -64,7 +64,7 @@ TEST_F(EventQueueTest, PopTimesOut) {
 }
 
 TEST_F(EventQueueTest, PushWakesUpPop) {
-    mochi_raft::EventQueue q;
+    mraft::EventQueue q;
 
     ABT_xstream xstream;
     ABT_xstream_create(ABT_SCHED_NULL, &xstream);
@@ -75,7 +75,7 @@ TEST_F(EventQueueTest, PushWakesUpPop) {
     ABT_thread_create(
         pool,
         [](void* arg) {
-            auto* queue = static_cast<mochi_raft::EventQueue*>(arg);
+            auto* queue = static_cast<mraft::EventQueue*>(arg);
             struct timespec ts = {0, 50000000}; // 50ms
             nanosleep(&ts, nullptr);
             queue->push(make_timeout_event(42));

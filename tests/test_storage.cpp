@@ -41,18 +41,18 @@ protected:
 
 TEST_F(StorageTest, InitCreatesDirectory) {
     std::string subdir = test_dir_ + "/data";
-    mochi_raft::Storage storage(abt_io_, subdir);
+    mraft::Storage storage(abt_io_, subdir);
     ASSERT_EQ(storage.init(), 0);
     EXPECT_TRUE(fs::is_directory(subdir));
 }
 
 TEST_F(StorageTest, InitExistingDirectorySucceeds) {
-    mochi_raft::Storage storage(abt_io_, test_dir_);
+    mraft::Storage storage(abt_io_, test_dir_);
     ASSERT_EQ(storage.init(), 0);
 }
 
 TEST_F(StorageTest, LoadMetadataEmptyDir) {
-    mochi_raft::Storage storage(abt_io_, test_dir_);
+    mraft::Storage storage(abt_io_, test_dir_);
     ASSERT_EQ(storage.init(), 0);
 
     raft_term term;
@@ -63,13 +63,13 @@ TEST_F(StorageTest, LoadMetadataEmptyDir) {
 }
 
 TEST_F(StorageTest, SetTermAndLoad) {
-    mochi_raft::Storage storage(abt_io_, test_dir_);
+    mraft::Storage storage(abt_io_, test_dir_);
     ASSERT_EQ(storage.init(), 0);
 
     ASSERT_EQ(storage.set_term(5), 0);
 
     // Load in a new Storage instance to verify persistence
-    mochi_raft::Storage storage2(abt_io_, test_dir_);
+    mraft::Storage storage2(abt_io_, test_dir_);
     ASSERT_EQ(storage2.init(), 0);
 
     raft_term term;
@@ -80,12 +80,12 @@ TEST_F(StorageTest, SetTermAndLoad) {
 }
 
 TEST_F(StorageTest, SetVoteAndLoad) {
-    mochi_raft::Storage storage(abt_io_, test_dir_);
+    mraft::Storage storage(abt_io_, test_dir_);
     ASSERT_EQ(storage.init(), 0);
 
     ASSERT_EQ(storage.set_vote(3), 0);
 
-    mochi_raft::Storage storage2(abt_io_, test_dir_);
+    mraft::Storage storage2(abt_io_, test_dir_);
     ASSERT_EQ(storage2.init(), 0);
 
     raft_term term;
@@ -96,13 +96,13 @@ TEST_F(StorageTest, SetVoteAndLoad) {
 }
 
 TEST_F(StorageTest, SetTermThenVoteAndLoad) {
-    mochi_raft::Storage storage(abt_io_, test_dir_);
+    mraft::Storage storage(abt_io_, test_dir_);
     ASSERT_EQ(storage.init(), 0);
 
     ASSERT_EQ(storage.set_term(5), 0);
     ASSERT_EQ(storage.set_vote(3), 0);
 
-    mochi_raft::Storage storage2(abt_io_, test_dir_);
+    mraft::Storage storage2(abt_io_, test_dir_);
     ASSERT_EQ(storage2.init(), 0);
 
     raft_term term;
@@ -113,7 +113,7 @@ TEST_F(StorageTest, SetTermThenVoteAndLoad) {
 }
 
 TEST_F(StorageTest, MultipleTermUpdates) {
-    mochi_raft::Storage storage(abt_io_, test_dir_);
+    mraft::Storage storage(abt_io_, test_dir_);
     ASSERT_EQ(storage.init(), 0);
 
     ASSERT_EQ(storage.set_term(1), 0);
@@ -121,7 +121,7 @@ TEST_F(StorageTest, MultipleTermUpdates) {
     ASSERT_EQ(storage.set_term(3), 0);
     ASSERT_EQ(storage.set_vote(7), 0);
 
-    mochi_raft::Storage storage2(abt_io_, test_dir_);
+    mraft::Storage storage2(abt_io_, test_dir_);
     ASSERT_EQ(storage2.init(), 0);
 
     raft_term term;
@@ -132,7 +132,7 @@ TEST_F(StorageTest, MultipleTermUpdates) {
 }
 
 TEST_F(StorageTest, DualFileRotation) {
-    mochi_raft::Storage storage(abt_io_, test_dir_);
+    mraft::Storage storage(abt_io_, test_dir_);
     ASSERT_EQ(storage.init(), 0);
 
     // First write goes to metadata1 (odd version)
@@ -148,7 +148,7 @@ TEST_F(StorageTest, DualFileRotation) {
     EXPECT_TRUE(fs::exists(test_dir_ + "/metadata2"));
 
     // Loading should return the latest value
-    mochi_raft::Storage storage2(abt_io_, test_dir_);
+    mraft::Storage storage2(abt_io_, test_dir_);
     ASSERT_EQ(storage2.init(), 0);
 
     raft_term term;
@@ -181,7 +181,7 @@ static void free_entries(struct raft_entry* entries, size_t n) {
 }
 
 TEST_F(StorageTest, AppendAndLoadEntries) {
-    mochi_raft::Storage storage(abt_io_, test_dir_);
+    mraft::Storage storage(abt_io_, test_dir_);
     ASSERT_EQ(storage.init(), 0);
 
     // Create and append 10 entries
@@ -196,7 +196,7 @@ TEST_F(StorageTest, AppendAndLoadEntries) {
     for (auto& e : entries) raft_free(e.buf.base);
 
     // Load back in a new instance
-    mochi_raft::Storage storage2(abt_io_, test_dir_);
+    mraft::Storage storage2(abt_io_, test_dir_);
     ASSERT_EQ(storage2.init(), 0);
 
     raft_term term;
@@ -222,7 +222,7 @@ TEST_F(StorageTest, AppendAndLoadEntries) {
 }
 
 TEST_F(StorageTest, LoadFromEmptyDir) {
-    mochi_raft::Storage storage(abt_io_, test_dir_);
+    mraft::Storage storage(abt_io_, test_dir_);
     ASSERT_EQ(storage.init(), 0);
 
     raft_term term;
@@ -239,7 +239,7 @@ TEST_F(StorageTest, LoadFromEmptyDir) {
 }
 
 TEST_F(StorageTest, TruncateEntries) {
-    mochi_raft::Storage storage(abt_io_, test_dir_);
+    mraft::Storage storage(abt_io_, test_dir_);
     ASSERT_EQ(storage.init(), 0);
 
     std::vector<struct raft_entry> entries;
@@ -261,7 +261,7 @@ TEST_F(StorageTest, TruncateEntries) {
     for (auto& e : new_entries) raft_free(e.buf.base);
 
     // Load and verify
-    mochi_raft::Storage storage2(abt_io_, test_dir_);
+    mraft::Storage storage2(abt_io_, test_dir_);
     ASSERT_EQ(storage2.init(), 0);
 
     raft_term term;
@@ -291,7 +291,7 @@ TEST_F(StorageTest, TruncateEntries) {
 }
 
 TEST_F(StorageTest, Bootstrap) {
-    mochi_raft::Storage storage(abt_io_, test_dir_);
+    mraft::Storage storage(abt_io_, test_dir_);
     ASSERT_EQ(storage.init(), 0);
 
     // Create a configuration with 1 server
@@ -303,7 +303,7 @@ TEST_F(StorageTest, Bootstrap) {
     raft_configuration_close(&conf);
 
     // Load and verify
-    mochi_raft::Storage storage2(abt_io_, test_dir_);
+    mraft::Storage storage2(abt_io_, test_dir_);
     ASSERT_EQ(storage2.init(), 0);
 
     raft_term term;

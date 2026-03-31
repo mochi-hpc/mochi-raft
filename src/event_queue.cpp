@@ -1,7 +1,7 @@
 #include "event_queue.hpp"
 #include <ctime>
 
-namespace mochi_raft {
+namespace mraft {
 
 EventQueue::EventQueue() {
     ABT_mutex_create(&mutex_);
@@ -54,4 +54,4 @@ std::unique_ptr<OwnedEvent> EventQueue::pop(double timeout_ms) {
     return result;
 }
 
-} // namespace mochi_raft
+} // namespace mraft

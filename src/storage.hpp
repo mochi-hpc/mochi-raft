@@ -8,7 +8,7 @@ extern "C" {
 #include <cstdint>
 #include <vector>
 
-namespace mochi_raft {
+namespace mraft {
 
 class Storage {
 public:

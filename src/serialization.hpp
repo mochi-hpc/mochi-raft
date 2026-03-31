@@ -12,7 +12,7 @@ extern "C" {
 #include <cereal/types/string.hpp>
 #include <cereal/types/vector.hpp>
 
-namespace mochi_raft {
+namespace mraft {
 
 // Serializable wrapper types for raft_message structs.
 // Each type provides a cereal-compatible serialize() method and
@@ -440,4 +440,4 @@ inline void free_message_entries(struct raft_message& msg) {
     }
 }
 
-} // namespace mochi_raft
+} // namespace mraft

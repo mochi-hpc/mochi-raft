@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <stdexcept>
 
-namespace mochi_raft {
+namespace mraft {
 
 // Little-endian encoding/decoding helpers
 static void put64(uint8_t* buf, uint64_t v) {
@@ -561,4 +561,4 @@ int Storage::bootstrap(const struct raft_configuration* conf) {
     return close_current_segment();
 }
 
-} // namespace mochi_raft
+} // namespace mraft

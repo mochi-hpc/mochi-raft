@@ -1,4 +1,3 @@
-#include "mochi-raft/mochi_raft.hpp"
 #include "storage.hpp"
 #include "network.hpp"
 #include "event_queue.hpp"
@@ -6,7 +5,7 @@
 #include <chrono>
 #include <cstring>
 
-namespace mochi_raft {
+namespace mraft {
 
 static raft_time now_ms() {
     auto tp = std::chrono::steady_clock::now().time_since_epoch();
@@ -335,4 +334,4 @@ int MochiRaftServer::transfer(raft_id target_id) {
     return 0;
 }
 
-} // namespace mochi_raft
+} // namespace mraft

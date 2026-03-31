@@ -36,8 +36,8 @@ protected:
 
     std::unique_ptr<tl::engine> engine1_;
     std::unique_ptr<tl::engine> engine2_;
-    std::unique_ptr<mochi_raft::Network> net1_;
-    std::unique_ptr<mochi_raft::Network> net2_;
+    std::unique_ptr<mraft::Network> net1_;
+    std::unique_ptr<mraft::Network> net2_;
     std::string addr1_;
     std::string addr2_;
 };
@@ -47,11 +47,11 @@ TEST_F(NetworkTest, SendRequestVote) {
     memset(&received_msg, 0, sizeof(received_msg));
     std::atomic<bool> received{false};
 
-    net1_ = std::make_unique<mochi_raft::Network>(
+    net1_ = std::make_unique<mraft::Network>(
         *engine1_, 0, 1, addr1_,
         [](struct raft_message* msg) { delete msg; });
 
-    net2_ = std::make_unique<mochi_raft::Network>(
+    net2_ = std::make_unique<mraft::Network>(
         *engine2_, 0, 2, addr2_,
         [&](struct raft_message* msg) {
             received_msg = *msg;
@@ -102,11 +102,11 @@ TEST_F(NetworkTest, SendAppendEntriesWithEntries) {
     memset(&received_msg, 0, sizeof(received_msg));
     std::atomic<bool> received{false};
 
-    net1_ = std::make_unique<mochi_raft::Network>(
+    net1_ = std::make_unique<mraft::Network>(
         *engine1_, 0, 1, addr1_,
         [](struct raft_message* msg) { delete msg; });
 
-    net2_ = std::make_unique<mochi_raft::Network>(
+    net2_ = std::make_unique<mraft::Network>(
         *engine2_, 0, 2, addr2_,
         [&](struct raft_message* msg) {
             received_msg = *msg;
@@ -163,7 +163,7 @@ TEST_F(NetworkTest, SendAppendEntriesWithEntries) {
     EXPECT_EQ(received_msg.append_entries.entries[1].buf.len, 10u);
 
     // Clean up received entries
-    mochi_raft::free_message_entries(received_msg);
+    mraft::free_message_entries(received_msg);
 }
 
 TEST_F(NetworkTest, SendRequestVoteResult) {
@@ -171,7 +171,7 @@ TEST_F(NetworkTest, SendRequestVoteResult) {
     memset(&received_msg, 0, sizeof(received_msg));
     std::atomic<bool> received{false};
 
-    net1_ = std::make_unique<mochi_raft::Network>(
+    net1_ = std::make_unique<mraft::Network>(
         *engine1_, 0, 1, addr1_,
         [&](struct raft_message* msg) {
             received_msg = *msg;
@@ -181,7 +181,7 @@ TEST_F(NetworkTest, SendRequestVoteResult) {
             received.store(true);
         });
 
-    net2_ = std::make_unique<mochi_raft::Network>(
+    net2_ = std::make_unique<mraft::Network>(
         *engine2_, 0, 2, addr2_,
         [](struct raft_message* msg) { delete msg; });
 
@@ -217,11 +217,11 @@ TEST_F(NetworkTest, SendTimeoutNow) {
     memset(&received_msg, 0, sizeof(received_msg));
     std::atomic<bool> received{false};
 
-    net1_ = std::make_unique<mochi_raft::Network>(
+    net1_ = std::make_unique<mraft::Network>(
         *engine1_, 0, 1, addr1_,
         [](struct raft_message* msg) { delete msg; });
 
-    net2_ = std::make_unique<mochi_raft::Network>(
+    net2_ = std::make_unique<mraft::Network>(
         *engine2_, 0, 2, addr2_,
         [&](struct raft_message* msg) {
             received_msg = *msg;

@@ -1,7 +1,7 @@
 #include "network.hpp"
 #include <thallium/provider_handle.hpp>
 
-namespace mochi_raft {
+namespace mraft {
 
 Network::Network(tl::engine& engine, uint16_t provider_id,
                  raft_id local_id, const std::string& local_address,
@@ -86,4 +86,4 @@ void Network::send(const struct raft_message* messages, unsigned n) {
     }
 }
 
-} // namespace mochi_raft
+} // namespace mraft

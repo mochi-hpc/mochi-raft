@@ -44,7 +44,7 @@ protected:
 
 TEST_F(RaftStepTest, SingleNodeElectionAndSubmit) {
     // 1. Bootstrap storage with a single server
-    mochi_raft::Storage storage(abt_io_, test_dir_);
+    mraft::Storage storage(abt_io_, test_dir_);
     ASSERT_EQ(storage.init(), 0);
 
     struct raft_configuration conf;
