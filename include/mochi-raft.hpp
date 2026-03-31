@@ -7,6 +7,7 @@ extern "C" {
 #include <raft.h>
 }
 
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -51,6 +52,14 @@ struct Fsm {
      * @return 0 on success, non-zero on error.
      */
     virtual int apply(std::string_view data) = 0;
+};
+
+/**
+ * @brief Options for submit() controlling the replication transport.
+ */
+struct SubmitOptions {
+    bool   use_rdma  = false; ///< Use RDMA bulk transfer instead of inline RPC.
+    double timeout_s = 5.0;  ///< Timeout in seconds for the RDMA RPC (RDMA path only).
 };
 
 /**
@@ -129,9 +138,11 @@ public:
      *
      * @param data Pointer to the entry payload.
      * @param len  Size of the payload in bytes.
+     * @param opts Transport options (use_rdma, timeout_s).
      * @return 0 on success, RAFT_NOTLEADER if this node is not the leader.
      */
-    int submit(const void* data, size_t len);
+    int submit(const void* data, size_t len,
+               const SubmitOptions& opts = {});
 
     /**
      * @brief Get this server's Raft ID.
@@ -210,6 +221,9 @@ private:
     std::atomic<bool> running_{false};
 
     raft_index last_applied_ = 0; ///< Tracks the last log index applied to the FSM.
+
+    struct EntryMeta { bool use_rdma; double timeout_s; };
+    std::map<raft_index, EntryMeta> entry_meta_; ///< Per-entry RDMA metadata.
 };
 
 } // namespace mraft

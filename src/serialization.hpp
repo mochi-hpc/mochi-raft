@@ -420,6 +420,45 @@ struct MessageData {
     }
 };
 
+// Per-entry metadata for the RDMA AppendEntries RPC (no inline payload).
+struct RdmaEntryMeta {
+    uint64_t term = 0;
+    uint8_t  type = 0;
+    uint64_t size = 0;  // bytes of this entry's data in the bulk
+
+    template <typename Archive>
+    void serialize(Archive& ar) { ar(term, type, size); }
+};
+
+// Arguments for the RDMA AppendEntries RPC.
+// The actual entry data is transferred via the accompanying tl::bulk handle.
+struct RdmaAppendEntriesArgs {
+    uint64_t    server_id      = 0;
+    std::string server_address;
+
+    // AppendEntries header fields (no inline entries)
+    uint8_t  version        = 0;
+    uint64_t term           = 0;
+    uint64_t prev_log_index = 0;
+    uint64_t prev_log_term  = 0;
+    uint64_t leader_commit  = 0;
+
+    // Per-entry layout: tells the receiver how to split the bulk
+    std::vector<RdmaEntryMeta> entries_meta;
+
+    // Timing: sent_at is seconds since system_clock epoch, set right before
+    // the RPC is issued so the receiver can compute remaining timeout.
+    double sent_at   = 0;
+    double timeout_s = 5.0;
+
+    template <typename Archive>
+    void serialize(Archive& ar) {
+        ar(server_id, server_address,
+           version, term, prev_log_index, prev_log_term, leader_commit,
+           entries_meta, sent_at, timeout_s);
+    }
+};
+
 // Helper to free entries allocated by to_raft for AppendEntries
 inline void free_message_entries(struct raft_message& msg) {
     if (msg.type == RAFT_APPEND_ENTRIES && msg.append_entries.entries) {

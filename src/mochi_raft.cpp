@@ -177,6 +177,15 @@ void MochiRaftServer::event_loop() {
             continue;
         }
 
+        // If this was an RDMA submit that produced new log entries, record
+        // the per-entry metadata so handle_update() can pick the right transport.
+        if (owned && owned->event.type == RAFT_SUBMIT && owned->use_rdma
+                && (update.flags & RAFT_UPDATE_ENTRIES)) {
+            for (unsigned j = 0; j < update.entries.n; j++)
+                entry_meta_[update.entries.index + j] =
+                    {owned->use_rdma, owned->rdma_timeout_s};
+        }
+
         handle_update(update);
     }
 }
@@ -213,7 +222,8 @@ void MochiRaftServer::handle_update(struct raft_update& update) {
 
     // 3. Send messages (after term/vote are persisted)
     if (update.flags & RAFT_UPDATE_MESSAGES) {
-        // Fill in AppendEntries entries from storage cache
+        // Fill in AppendEntries entries from storage cache, then dispatch
+        // each message via the appropriate transport (RDMA or inline RPC).
         for (unsigned i = 0; i < update.messages.n; i++) {
             struct raft_message& msg = update.messages.batch[i];
             if (msg.type == RAFT_APPEND_ENTRIES &&
@@ -231,8 +241,28 @@ void MochiRaftServer::handle_update(struct raft_update& update) {
                     msg.append_entries.entries = nullptr;
                 }
             }
+
+            // Choose RDMA path if any entry in this message was submitted
+            // with use_rdma=true.
+            bool   use_rdma  = false;
+            double timeout_s = 5.0;
+            if (msg.type == RAFT_APPEND_ENTRIES &&
+                    msg.append_entries.n_entries > 0) {
+                raft_index first = msg.append_entries.prev_log_index + 1;
+                for (unsigned j = 0; j < msg.append_entries.n_entries; j++) {
+                    auto it = entry_meta_.find(first + j);
+                    if (it != entry_meta_.end() && it->second.use_rdma) {
+                        use_rdma  = true;
+                        timeout_s = std::min(timeout_s, it->second.timeout_s);
+                    }
+                }
+            }
+
+            if (use_rdma)
+                network_->send_rdma(&msg, timeout_s);
+            else
+                network_->send(&msg, 1);
         }
-        network_->send(update.messages.batch, update.messages.n);
     }
 
     // 4. Apply committed entries
@@ -267,11 +297,13 @@ void MochiRaftServer::apply_committed_entries() {
             fsm_.apply({static_cast<const char*>(entry->buf.base), entry->buf.len});
         }
 
+        entry_meta_.erase(idx);
         last_applied_ = idx;
     }
 }
 
-int MochiRaftServer::submit(const void* data, size_t len) {
+int MochiRaftServer::submit(const void* data, size_t len,
+                             const SubmitOptions& opts) {
     // Create an owned event with heap-allocated entry data
     auto owned = std::make_unique<OwnedEvent>();
     owned->submit_entry = std::make_unique<struct raft_entry>();
@@ -289,6 +321,9 @@ int MochiRaftServer::submit(const void* data, size_t len) {
     owned->event.time = now_ms();
     owned->event.submit.entries = owned->submit_entry.get();
     owned->event.submit.n = 1;
+
+    owned->use_rdma       = opts.use_rdma;
+    owned->rdma_timeout_s = opts.timeout_s;
 
     queue_->push(std::move(owned));
     return 0;
