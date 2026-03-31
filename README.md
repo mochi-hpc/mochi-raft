@@ -42,7 +42,7 @@ This design gives the application full control over I/O scheduling and allows in
 
 ### Components
 
-- **MochiRaftServer** (`include/mochi-raft/mochi_raft.hpp`): Public API. Manages the raft instance lifecycle, event loop, and coordinates all components.
+- **MochiRaftServer** (`include/mochi-raft.hpp`): Public API. Manages the raft instance lifecycle, event loop, and coordinates all components.
 
 - **Storage** (`src/storage.hpp`): Persistent storage using ABT-IO. Stores metadata (term, voted_for) in double-buffered files and log entries in segment files with automatic rotation. Maintains an in-memory entry cache for fast AppendEntries message assembly.
 
@@ -108,9 +108,9 @@ ctest --output-on-failure
 ### Implementing the FSM
 
 ```cpp
-#include <mochi-raft/mochi_raft.hpp>
+#include <mochi-raft.hpp>
 
-struct MyFsm : mochi_raft::Fsm {
+struct MyFsm : mraft::Fsm {
     int apply(const struct raft_buffer& buf) override {
         // Apply committed entry to your state machine.
         // buf.base contains the data, buf.len its size.
@@ -125,7 +125,7 @@ struct MyFsm : mochi_raft::Fsm {
 ```cpp
 #include <thallium.hpp>
 #include <abt-io.h>
-#include <mochi-raft/mochi_raft.hpp>
+#include <mochi-raft.hpp>
 
 namespace tl = thallium;
 
@@ -135,13 +135,12 @@ int main() {
     std::string address = static_cast<std::string>(engine.self());
 
     // Initialize ABT-IO
-    abt_io_instance_id abt_io;
-    abt_io_init(1, &abt_io);
+    abt_io_instance_id abt_io = abt_io_init(1);
 
     MyFsm fsm;
 
     // Create server (id=1, provider_id=0)
-    mochi_raft::MochiRaftServer server(
+    mraft::MochiRaftServer server(
         engine, abt_io, 1, address, "/tmp/raft-data", fsm);
 
     // Bootstrap a 3-node cluster (call on ALL nodes before start)
@@ -171,13 +170,13 @@ int main() {
 
 ### API Reference
 
-#### `mochi_raft::Fsm`
+#### `mraft::Fsm`
 
 | Method | Description |
 |--------|-------------|
 | `virtual int apply(const raft_buffer& buf)` | Apply a committed entry. Called in order for each `RAFT_COMMAND` entry. Return 0 on success. |
 
-#### `mochi_raft::MochiRaftServer`
+#### `mraft::MochiRaftServer`
 
 | Method | Description |
 |--------|-------------|
@@ -193,7 +192,7 @@ int main() {
 | `void set_isolation(IsolationMode mode)` | Set network isolation: `NONE`, `INBOUND`, `OUTBOUND`, `BOTH`. |
 | `int transfer(raft_id target_id)` | Initiate leadership transfer to target node. |
 
-#### `mochi_raft::IsolationMode`
+#### `mraft::IsolationMode`
 
 | Value | Description |
 |-------|-------------|
@@ -295,4 +294,4 @@ ID  STATE       TERM  COMMIT  ADDRESS
 
 ## License
 
-See the respective licenses for [c-raft](https://github.com/cowsql/raft/blob/main/LICENSE) and [Mochi](https://github.com/mochi-hpc) components.
+See [COPYRIGHT](COPYRIGHT).
