@@ -264,7 +264,7 @@ void MochiRaftServer::apply_committed_entries() {
         // Only apply RAFT_COMMAND entries to the FSM;
         // skip RAFT_CHANGE (configuration) and RAFT_BARRIER entries.
         if (entry->type == RAFT_COMMAND && entry->buf.base && entry->buf.len > 0) {
-            fsm_.apply(entry->buf);
+            fsm_.apply({static_cast<const char*>(entry->buf.base), entry->buf.len});
         }
 
         last_applied_ = idx;

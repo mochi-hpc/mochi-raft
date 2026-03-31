@@ -20,7 +20,7 @@ namespace fs = std::filesystem;
 
 class NoOpFsm : public mraft::Fsm {
 public:
-    int apply(const struct raft_buffer& buf) override {
+    int apply(std::string_view) override {
         applied_count_.fetch_add(1);
         return 0;
     }

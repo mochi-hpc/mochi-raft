@@ -9,6 +9,7 @@ extern "C" {
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <atomic>
 
@@ -46,11 +47,10 @@ struct Fsm {
      * Called in log order for each committed RAFT_COMMAND entry.
      * RAFT_CHANGE (configuration) and RAFT_BARRIER entries are skipped.
      *
-     * @param buf The entry payload. buf.base points to the data, buf.len
-     *            is its size in bytes.
+     * @param data The entry payload as a string view.
      * @return 0 on success, non-zero on error.
      */
-    virtual int apply(const struct raft_buffer& buf) = 0;
+    virtual int apply(std::string_view data) = 0;
 };
 
 /**

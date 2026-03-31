@@ -6,14 +6,13 @@
 #include <string>
 #include <mutex>
 #include <optional>
-#include <cstring>
 
 // Key-value FSM for CLI testing.
 // Entries are "PUT <key> <value>" strings.
 class KeyValueFsm : public mraft::Fsm {
 public:
-    int apply(const struct raft_buffer& buf) override {
-        std::string cmd(static_cast<const char*>(buf.base), buf.len);
+    int apply(std::string_view data) override {
+        std::string cmd(data);
 
         // Parse "PUT <key> <value>"
         if (cmd.size() < 5 || cmd.substr(0, 4) != "PUT ") {
