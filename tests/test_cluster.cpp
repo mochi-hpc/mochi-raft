@@ -193,6 +193,46 @@ TEST_F(ClusterTest, SubmitAndReplicate) {
     }
 }
 
+TEST_F(ClusterTest, SubmitAndReplicateOverRdma) {
+    create_and_bootstrap();
+
+    // threshold=0: every non-empty entry goes via RDMA bulk transfer
+    for (int i = 0; i < N; i++) {
+        servers_[i]->set_rdma_config(0, 5000.0, 0.0);
+    }
+
+    for (int i = 0; i < N; i++) {
+        ASSERT_EQ(servers_[i]->start(), 0);
+    }
+
+    ASSERT_TRUE(wait_for_leader());
+    int leader = find_leader();
+    ASSERT_GE(leader, 0);
+
+    const char* data = "rdma-replicated-data";
+    ASSERT_EQ(servers_[leader]->submit(mraft::MochiRaftBuffer{data, strlen(data)}), 0);
+
+    raft_index initial = servers_[leader]->commit_index();
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::seconds(10);
+    while (servers_[leader]->commit_index() <= initial &&
+           std::chrono::steady_clock::now() < deadline) {
+        yield_ms(10);
+    }
+
+    EXPECT_GT(servers_[leader]->commit_index(), initial)
+        << "Leader's commit index did not advance over RDMA";
+
+    yield_ms(500);
+
+    EXPECT_GE(fsms_[leader].applied_count(), 1)
+        << "Leader FSM did not apply any entries after RDMA replication";
+
+    for (int i = 0; i < N; i++) {
+        servers_[i]->shutdown();
+    }
+}
+
 TEST_F(ClusterTest, IsolateLeaderNewElection) {
     create_and_bootstrap();
 

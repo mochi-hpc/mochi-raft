@@ -34,10 +34,6 @@ struct OwnedEvent {
     // For RAFT_RECEIVE: heap-allocated message (already owned by Network)
     // Just passed through — not freed here (freed by raft after processing)
 
-    // RDMA metadata (only meaningful for RAFT_SUBMIT events)
-    bool   use_rdma       = false;
-    double rdma_timeout_s = 5.0;
-
     OwnedEvent() { memset(&event, 0, sizeof(event)); }
 };
 

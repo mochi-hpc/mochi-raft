@@ -179,15 +179,6 @@ void MochiRaftServer::event_loop() {
             continue;
         }
 
-        // If this was an RDMA submit that produced new log entries, record
-        // the per-entry metadata so handle_update() can pick the right transport.
-        if (owned && owned->event.type == RAFT_SUBMIT && owned->use_rdma
-                && (update.flags & RAFT_UPDATE_ENTRIES)) {
-            for (unsigned j = 0; j < update.entries.n; j++)
-                entry_meta_[update.entries.index + j] =
-                    {owned->use_rdma, owned->rdma_timeout_s};
-        }
-
         handle_update(update);
     }
 }
@@ -244,21 +235,16 @@ void MochiRaftServer::handle_update(struct raft_update& update) {
                 }
             }
 
-            // Choose RDMA path if any entry in this message was submitted
-            // with use_rdma=true.
-            bool   use_rdma  = false;
-            double timeout_s = 5.0;
-            if (msg.type == RAFT_APPEND_ENTRIES &&
-                    msg.append_entries.n_entries > 0) {
-                raft_index first = msg.append_entries.prev_log_index + 1;
-                for (unsigned j = 0; j < msg.append_entries.n_entries; j++) {
-                    auto it = entry_meta_.find(first + j);
-                    if (it != entry_meta_.end() && it->second.use_rdma) {
-                        use_rdma  = true;
-                        timeout_s = std::min(timeout_s, it->second.timeout_s);
-                    }
-                }
+            // Decide transport: RDMA if total entry payload exceeds threshold.
+            size_t data_size = 0;
+            if (msg.type == RAFT_APPEND_ENTRIES) {
+                for (unsigned j = 0; j < msg.append_entries.n_entries; j++)
+                    data_size += msg.append_entries.entries[j].buf.len;
             }
+            bool use_rdma = data_size > rdma_threshold_;
+            double timeout_s = std::max(min_timeout_ms_,
+                                        timeout_factor_ * static_cast<double>(data_size))
+                               / 1000.0;
 
             if (use_rdma)
                 network_->send_rdma(&msg, timeout_s);
@@ -299,12 +285,11 @@ void MochiRaftServer::apply_committed_entries() {
             fsm_.apply({static_cast<const char*>(entry->buf.base), entry->buf.len});
         }
 
-        entry_meta_.erase(idx);
         last_applied_ = idx;
     }
 }
 
-int MochiRaftServer::submit(MochiRaftBuffer&& buf, const SubmitOptions& opts) {
+int MochiRaftServer::submit(MochiRaftBuffer&& buf) {
     size_t len  = buf.size();
     void*  base = buf.release();   // take ownership; buf will no longer free it
     if (!base) return RAFT_NOMEM;
@@ -324,11 +309,16 @@ int MochiRaftServer::submit(MochiRaftBuffer&& buf, const SubmitOptions& opts) {
     owned->event.submit.entries = owned->submit_entry.get();
     owned->event.submit.n = 1;
 
-    owned->use_rdma       = opts.use_rdma;
-    owned->rdma_timeout_s = opts.timeout_s;
-
     queue_->push(std::move(owned));
     return 0;
+}
+
+void MochiRaftServer::set_rdma_config(size_t rdma_threshold,
+                                       double min_timeout_ms,
+                                       double timeout_factor) {
+    rdma_threshold_ = rdma_threshold;
+    min_timeout_ms_ = min_timeout_ms;
+    timeout_factor_ = timeout_factor;
 }
 
 raft_id MochiRaftServer::id() const {

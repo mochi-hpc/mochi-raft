@@ -7,8 +7,8 @@ extern "C" {
 #include <raft.h>
 }
 
+#include <climits>
 #include <cstring>
-#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -122,14 +122,6 @@ private:
 };
 
 /**
- * @brief Options for submit() controlling the replication transport.
- */
-struct SubmitOptions {
-    bool   use_rdma  = false; ///< Use RDMA bulk transfer instead of inline RPC.
-    double timeout_s = 5.0;  ///< Timeout in seconds for the RDMA RPC (RDMA path only).
-};
-
-/**
  * @brief A Raft server backed by Thallium RPCs and ABT-IO storage.
  *
  * Wraps c-raft's step-based API (raft_step()) with Mochi components:
@@ -208,11 +200,10 @@ public:
      * The entry will be committed once a majority of the cluster has
      * persisted it, then applied to the FSM.
      *
-     * @param data The entry payload.
-     * @param opts Transport options (use_rdma, timeout_s).
+     * @param buf The entry payload.
      * @return 0 on success, RAFT_NOTLEADER if this node is not the leader.
      */
-    int submit(MochiRaftBuffer&& buf, const SubmitOptions& opts = {});
+    int submit(MochiRaftBuffer&& buf);
 
     /**
      * @brief Get this server's Raft ID.
@@ -261,6 +252,23 @@ public:
      * @note Not thread-safe; intended for polling from outside the event loop.
      */
     std::pair<raft_id, std::string> leader() const;
+
+    /**
+     * @brief Configure the RDMA transport policy.
+     *
+     * Entries whose total payload exceeds rdma_threshold bytes are sent via
+     * RDMA bulk transfer; smaller entries use inline RPC. The timeout for an
+     * RDMA send is max(min_timeout_ms, timeout_factor * data_size_bytes),
+     * converted to seconds. Defaults: RDMA disabled (threshold = SIZE_MAX),
+     * min_timeout_ms = 5000, timeout_factor = 0.
+     *
+     * @param rdma_threshold  Byte threshold above which RDMA is used.
+     * @param min_timeout_ms  Minimum RDMA timeout in milliseconds.
+     * @param timeout_factor  Milliseconds of timeout added per byte of data.
+     */
+    void set_rdma_config(size_t rdma_threshold,
+                         double min_timeout_ms,
+                         double timeout_factor);
 
     /**
      * @brief Set the network isolation mode.
@@ -314,8 +322,9 @@ private:
 
     raft_index last_applied_ = 0; ///< Tracks the last log index applied to the FSM.
 
-    struct EntryMeta { bool use_rdma; double timeout_s; };
-    std::map<raft_index, EntryMeta> entry_meta_; ///< Per-entry RDMA metadata.
+    size_t rdma_threshold_ = SIZE_MAX; ///< Byte threshold above which RDMA is used (default: disabled).
+    double min_timeout_ms_ = 5000.0;   ///< Minimum RDMA timeout in milliseconds.
+    double timeout_factor_ = 0.0;      ///< Additional ms of timeout per byte of data.
 };
 
 } // namespace mraft
