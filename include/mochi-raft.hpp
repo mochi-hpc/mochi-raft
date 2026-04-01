@@ -9,6 +9,8 @@ extern "C" {
 
 #include <climits>
 #include <cstring>
+#include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -200,10 +202,19 @@ public:
      * The entry will be committed once a majority of the cluster has
      * persisted it, then applied to the FSM.
      *
-     * @param buf The entry payload.
+     * If on_applied is provided, it is called exactly once:
+     * - with 0 when the entry has been applied to the FSM, or
+     * - with RAFT_NOTLEADER if the entry was rolled back due to a leadership
+     *   change before it could be committed.
+     *
+     * The callback is invoked from the event loop ULT, not the caller's thread.
+     *
+     * @param buf        The entry payload.
+     * @param on_applied Optional completion callback.
      * @return 0 on success, RAFT_NOTLEADER if this node is not the leader.
      */
-    int submit(MochiRaftBuffer&& buf);
+    int submit(MochiRaftBuffer&& buf,
+               std::function<void(int)> on_applied = {});
 
     /**
      * @brief Get this server's Raft ID.
@@ -325,6 +336,12 @@ private:
     size_t rdma_threshold_ = SIZE_MAX; ///< Byte threshold above which RDMA is used (default: disabled).
     double min_timeout_ms_ = 5000.0;   ///< Minimum RDMA timeout in milliseconds.
     double timeout_factor_ = 0.0;      ///< Additional ms of timeout per byte of data.
+
+    struct PendingCallback {
+        raft_term             term;
+        std::function<void(int)> fn;
+    };
+    std::map<raft_index, PendingCallback> pending_callbacks_;
 };
 
 } // namespace mraft

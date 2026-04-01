@@ -179,6 +179,21 @@ void MochiRaftServer::event_loop() {
             continue;
         }
 
+        if (update.flags & RAFT_UPDATE_ENTRIES) {
+            // Cancel any pending callbacks whose index is being overwritten.
+            auto it = pending_callbacks_.lower_bound(update.entries.index);
+            while (it != pending_callbacks_.end()) {
+                it->second.fn(RAFT_NOTLEADER);
+                it = pending_callbacks_.erase(it);
+            }
+            // Register a new callback if this was a submit with one.
+            if (owned && owned->event.type == RAFT_SUBMIT && owned->on_applied) {
+                raft_term term = update.entries.batch[0].term;
+                pending_callbacks_[update.entries.index] =
+                    {term, std::move(owned->on_applied)};
+            }
+        }
+
         handle_update(update);
     }
 }
@@ -285,11 +300,19 @@ void MochiRaftServer::apply_committed_entries() {
             fsm_.apply({static_cast<const char*>(entry->buf.base), entry->buf.len});
         }
 
+        auto it = pending_callbacks_.find(idx);
+        if (it != pending_callbacks_.end()) {
+            if (it->second.term == entry->term)
+                it->second.fn(0);
+            pending_callbacks_.erase(it);
+        }
+
         last_applied_ = idx;
     }
 }
 
-int MochiRaftServer::submit(MochiRaftBuffer&& buf) {
+int MochiRaftServer::submit(MochiRaftBuffer&& buf,
+                             std::function<void(int)> on_applied) {
     size_t len  = buf.size();
     void*  base = buf.release();   // take ownership; buf will no longer free it
     if (!base) return RAFT_NOMEM;
@@ -308,6 +331,7 @@ int MochiRaftServer::submit(MochiRaftBuffer&& buf) {
     owned->event.time = now_ms();
     owned->event.submit.entries = owned->submit_entry.get();
     owned->event.submit.n = 1;
+    owned->on_applied = std::move(on_applied);
 
     queue_->push(std::move(owned));
     return 0;

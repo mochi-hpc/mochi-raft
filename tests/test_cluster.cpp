@@ -233,6 +233,35 @@ TEST_F(ClusterTest, SubmitAndReplicateOverRdma) {
     }
 }
 
+TEST_F(ClusterTest, SubmitWithCallback) {
+    create_and_bootstrap();
+
+    for (int i = 0; i < N; i++) {
+        ASSERT_EQ(servers_[i]->start(), 0);
+    }
+
+    ASSERT_TRUE(wait_for_leader());
+    int leader = find_leader();
+    ASSERT_GE(leader, 0);
+
+    std::atomic<int> callback_rv{-1};
+    const char* data = "cluster-callback-test";
+    ASSERT_EQ(servers_[leader]->submit(
+        mraft::MochiRaftBuffer{data, strlen(data)},
+        [&](int rv) { callback_rv.store(rv); }), 0);
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (callback_rv.load() == -1 &&
+           std::chrono::steady_clock::now() < deadline)
+        yield_ms(10);
+
+    EXPECT_EQ(callback_rv.load(), 0);
+
+    for (int i = 0; i < N; i++) {
+        servers_[i]->shutdown();
+    }
+}
+
 TEST_F(ClusterTest, IsolateLeaderNewElection) {
     create_and_bootstrap();
 

@@ -6,6 +6,7 @@ extern "C" {
 
 #include <thallium.hpp>
 #include <deque>
+#include <functional>
 #include <optional>
 #include <cstdint>
 #include <memory>
@@ -33,6 +34,9 @@ struct OwnedEvent {
 
     // For RAFT_RECEIVE: heap-allocated message (already owned by Network)
     // Just passed through — not freed here (freed by raft after processing)
+
+    // Optional completion callback for RAFT_SUBMIT events.
+    std::function<void(int)> on_applied;
 
     OwnedEvent() { memset(&event, 0, sizeof(event)); }
 };

@@ -139,6 +139,35 @@ TEST_F(SingleNodeTest, SubmitEntry) {
     server_->shutdown();
 }
 
+TEST_F(SingleNodeTest, SubmitWithCallback) {
+    auto pool = engine_->get_handler_pool();
+    server_ = std::make_unique<mraft::MochiRaftServer>(
+        *engine_, abt_io_, 1, pool, pool, test_dir_, fsm_);
+
+    ASSERT_EQ(server_->bootstrap({{1, address_}}), 0);
+    ASSERT_EQ(server_->start(), 0);
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (server_->state() != RAFT_LEADER &&
+           std::chrono::steady_clock::now() < deadline)
+        yield_ms(10);
+    ASSERT_EQ(server_->state(), RAFT_LEADER);
+
+    std::atomic<int> callback_rv{-1};
+    const char* data = "callback-test";
+    ASSERT_EQ(server_->submit(
+        mraft::MochiRaftBuffer{data, strlen(data)},
+        [&](int rv) { callback_rv.store(rv); }), 0);
+
+    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (callback_rv.load() == -1 &&
+           std::chrono::steady_clock::now() < deadline)
+        yield_ms(10);
+
+    EXPECT_EQ(callback_rv.load(), 0);
+    server_->shutdown();
+}
+
 int main(int argc, char** argv) {
     ABT_init(0, NULL);
     ::testing::InitGoogleTest(&argc, argv);
