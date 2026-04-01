@@ -45,6 +45,10 @@ public:
     int get_entries(raft_index first_index, unsigned n,
                     const struct raft_entry** entries);
 
+    // First log index still present in the in-memory cache.
+    // Entries before this index have been discarded (covered by a snapshot).
+    raft_index first_cached_index() const { return cache_start_index_; }
+
     // Bootstrap: write initial configuration as the first log entry.
     int bootstrap(const struct raft_configuration* conf);
 

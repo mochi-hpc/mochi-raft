@@ -408,6 +408,20 @@ public:
     int transfer(raft_id target_id);
 
     /**
+     * @brief Get the first log index still available for replay.
+     *
+     * Log entries before this index have been discarded by log compaction
+     * following a snapshot. Passing a `from` value smaller than this to
+     * entries() will silently skip the missing history.
+     *
+     * Returns 1 if no snapshot has been taken yet.
+     *
+     * @return The first log index still present in storage.
+     * @note Not thread-safe; intended for polling from outside the event loop.
+     */
+    raft_index log_start_index() const;
+
+    /**
      * @brief Set the number of committed entries between automatic snapshots.
      *
      * Once @p n entries have been applied since the last snapshot, the
@@ -446,7 +460,9 @@ public:
      *
      * Must be called and used from an Argobots ULT context.
      *
-     * @param from   First log index to deliver (default: 1).
+     * @param from   First log index to deliver (default: 1). Must be >=
+     *               log_start_index(); entries before that have been discarded
+     *               by log compaction and will be silently skipped.
      * @param to     Last log index to deliver, inclusive (default: 0 = live tail).
      * @param config Batch size and prefetch depth.
      * @return       A LogIterator ready to receive advance() calls.

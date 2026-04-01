@@ -535,6 +535,10 @@ raft_term MochiRaftServer::current_term() const {
     return raft_current_term(const_cast<struct raft*>(&raft_));
 }
 
+raft_index MochiRaftServer::log_start_index() const {
+    return storage_->first_cached_index();
+}
+
 raft_index MochiRaftServer::commit_index() const {
     return raft_commit_index(const_cast<struct raft*>(&raft_));
 }
