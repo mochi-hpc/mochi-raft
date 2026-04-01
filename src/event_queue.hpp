@@ -47,6 +47,11 @@ struct OwnedEvent {
     std::vector<uint8_t> forward_data;
     uint64_t             forward_corr_id = 0;
 
+    // For iterator registration events: the event loop calls iter_register_fn()
+    // once to replay historical entries and enroll the iterator for future pushes.
+    bool                  is_iter_register = false;
+    std::function<void()> iter_register_fn;
+
     OwnedEvent() { memset(&event, 0, sizeof(event)); }
 };
 

@@ -1,6 +1,7 @@
 #include "storage.hpp"
 #include "network.hpp"
 #include "event_queue.hpp"
+#include "log_iterator_impl.hpp"
 
 #include <chrono>
 #include <cstring>
@@ -146,6 +147,11 @@ void MochiRaftServer::shutdown() {
     loop_thread_->join();
     loop_thread_ = tl::managed<tl::thread>();
 
+    // Wake up any iterators that are blocked waiting for new commits.
+    for (auto& impl : active_iterators_)
+        impl->mark_eof();
+    active_iterators_.clear();
+
     raft_close(&raft_, NULL);
 }
 
@@ -168,6 +174,11 @@ void MochiRaftServer::event_loop() {
         // Forward-submit events bypass raft_step() entirely.
         if (owned && owned->is_forward) {
             handle_forward(*owned);
+            continue;
+        }
+
+        if (owned && owned->is_iter_register) {
+            if (owned->iter_register_fn) owned->iter_register_fn();
             continue;
         }
 
@@ -312,7 +323,10 @@ void MochiRaftServer::apply_committed_entries() {
         // Only apply RAFT_COMMAND entries to the FSM;
         // skip RAFT_CHANGE (configuration) and RAFT_BARRIER entries.
         if (entry->type == RAFT_COMMAND && entry->buf.base && entry->buf.len > 0) {
-            fsm_.apply({static_cast<const char*>(entry->buf.base), entry->buf.len});
+            const char* base = static_cast<const char*>(entry->buf.base);
+            size_t      len  = entry->buf.len;
+            fsm_.apply({base, len});
+            push_to_iterators(idx, base, len);
         }
 
         auto it = pending_callbacks_.find(idx);
@@ -476,6 +490,89 @@ void MochiRaftServer::on_forward_result_received(uint64_t corr_id, int rv) {
         }
     }
     if (cb) cb(rv);
+}
+
+LogIterator MochiRaftServer::entries(raft_index from, raft_index to,
+                                      LogIteratorConfig config) {
+    auto impl      = std::make_shared<LogIterator::Impl>();
+    impl->from_    = (from == 0) ? 1 : from;
+    impl->to_      = to;
+    impl->config_  = config;
+
+    // Post a registration event so the event loop replays history and
+    // enrolls the iterator for future pushes — all from a single ULT.
+    std::weak_ptr<LogIterator::Impl> weak = impl;
+    auto owned                = std::make_unique<OwnedEvent>();
+    owned->is_iter_register   = true;
+    owned->iter_register_fn   = [this, weak]() {
+        auto p = weak.lock();
+        if (p) handle_iter_register(std::move(p));
+    };
+    queue_->push(std::move(owned));
+
+    return LogIterator(std::move(impl));
+}
+
+void MochiRaftServer::handle_iter_register(
+        std::shared_ptr<LogIterator::Impl> impl) {
+    // Called from the event loop ULT — safe to read raft_ and storage_.
+    raft_index ci   = raft_commit_index(const_cast<struct raft*>(&raft_));
+    raft_index from = impl->from_;
+
+    // Replay historical entries in batches.
+    for (raft_index idx = from; idx <= ci && !impl->stopped_.load(); ) {
+        unsigned n = static_cast<unsigned>(
+            std::min<raft_index>(impl->config_.batch_size, ci - idx + 1));
+
+        const struct raft_entry* batch = nullptr;
+        int rv = storage_->get_entries(idx, n, &batch);
+        if (rv != 0 || !batch) break;
+
+        for (unsigned i = 0; i < n; i++) {
+            raft_index eidx = idx + i;
+            const auto& e   = batch[i];
+            if (e.type == RAFT_COMMAND && e.buf.base && e.buf.len > 0) {
+                impl->push(eidx,
+                           static_cast<const char*>(e.buf.base), e.buf.len);
+            }
+            if (impl->to_ > 0 && eidx >= impl->to_) {
+                impl->mark_eof();
+                return;   // do not enroll; bounded range is already done
+            }
+        }
+        idx += n;
+    }
+
+    if (impl->stopped_.load()) return;
+
+    // Bounded range already satisfied by history.
+    if (impl->to_ > 0 && ci >= impl->to_) {
+        impl->mark_eof();
+        return;
+    }
+
+    // Enroll for future pushes from apply_committed_entries().
+    active_iterators_.push_back(std::move(impl));
+}
+
+void MochiRaftServer::push_to_iterators(raft_index idx,
+                                         const char* base, size_t len) {
+    // Called from apply_committed_entries(), which runs in the event loop ULT.
+    auto it = active_iterators_.begin();
+    while (it != active_iterators_.end()) {
+        auto& impl = *it;
+        if (impl->stopped_.load()) {
+            it = active_iterators_.erase(it);
+            continue;
+        }
+        impl->push(idx, base, len);
+        if (impl->to_ > 0 && idx >= impl->to_) {
+            impl->mark_eof();
+            it = active_iterators_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 } // namespace mraft

@@ -21,6 +21,7 @@ add_library(mochi-raft
     src/network.cpp
     src/event_queue.cpp
     src/mochi_raft.cpp
+    src/log_iterator.cpp
 )
 target_include_directories(mochi-raft
     PUBLIC

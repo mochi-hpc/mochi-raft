@@ -9,6 +9,7 @@ extern "C" {
 
 #include <climits>
 #include <cstring>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -36,6 +37,82 @@ class Storage;
 class Network;
 class EventQueue;
 struct OwnedEvent;
+
+/**
+ * @brief A single committed log entry, as seen by a LogIterator.
+ *
+ * The data view is valid until the next call to LogIterator::advance().
+ */
+struct LogEntry {
+    raft_index       index; ///< Log index of this entry.
+    std::string_view data;  ///< Entry payload; valid until the next advance().
+};
+
+/**
+ * @brief Configuration for LogIterator batch loading and prefetch buffering.
+ */
+struct LogIteratorConfig {
+    /// Maximum number of entries read from storage per batch.
+    /// Actual batch size may be smaller at segment boundaries.
+    size_t batch_size = 32;
+
+    /// Number of additional batches to buffer ahead of the current position.
+    /// Higher values reduce advance() latency at the cost of more memory.
+    size_t prefetch_batches = 1;
+};
+
+/**
+ * @brief Forward iterator over committed RAFT_COMMAND log entries.
+ *
+ * Obtained from MochiRaftServer::entries(). Skips RAFT_CHANGE and RAFT_BARRIER
+ * entries; only application payloads are surfaced.
+ *
+ * advance() blocks (yields the calling ULT) until the next committed entry is
+ * available. For a live tail (to=0), advance() only returns false when stop()
+ * is called. For a bounded range (to>0), advance() returns false once the upper
+ * bound has been delivered.
+ *
+ * Must be used from an Argobots ULT context.
+ */
+class LogIterator {
+public:
+    /**
+     * @brief Advance to the next committed entry.
+     *
+     * Blocks (yields the ULT) if no entry is available yet. Returns true when
+     * a new entry has been loaded into current(). Returns false when:
+     *   - stop() was called from another ULT, or
+     *   - the bounded upper bound (to > 0) has been reached.
+     */
+    bool advance();
+
+    /**
+     * @brief The current entry.
+     *
+     * Valid from when advance() returns true until the next call to advance().
+     */
+    const LogEntry& current() const;
+
+    /**
+     * @brief Unblock a waiting advance() and cause it to return false.
+     *
+     * Thread-safe; may be called from any ULT.
+     */
+    void stop();
+
+    LogIterator(LogIterator&&) noexcept;
+    LogIterator& operator=(LogIterator&&) noexcept;
+    ~LogIterator();
+
+    LogIterator(const LogIterator&)            = delete;
+    LogIterator& operator=(const LogIterator&) = delete;
+
+private:
+    struct Impl;
+    std::shared_ptr<Impl> impl_;
+    explicit LogIterator(std::shared_ptr<Impl> impl);
+    friend class MochiRaftServer;
+};
 
 /**
  * @brief User-provided finite state machine.
@@ -307,6 +384,31 @@ public:
     int transfer(raft_id target_id);
 
     /**
+     * @brief Obtain a forward iterator over committed log entries.
+     *
+     * Only RAFT_COMMAND entries are surfaced; configuration and barrier entries
+     * are skipped automatically.
+     *
+     * Historical entries (indices already committed at call time) are replayed
+     * first, then the iterator tails new commits as they arrive.
+     *
+     * If to == 0 (default), the iterator runs indefinitely; advance() blocks
+     * waiting for new commits until stop() is called.
+     * If to > 0, advance() returns false after delivering the entry at index to.
+     * Prefetch is never issued past the to bound.
+     *
+     * Must be called and used from an Argobots ULT context.
+     *
+     * @param from   First log index to deliver (default: 1).
+     * @param to     Last log index to deliver, inclusive (default: 0 = live tail).
+     * @param config Batch size and prefetch depth.
+     * @return       A LogIterator ready to receive advance() calls.
+     */
+    LogIterator entries(raft_index        from   = 1,
+                        raft_index        to     = 0,
+                        LogIteratorConfig config = {});
+
+    /**
      * @brief Shut down the server.
      *
      * Stops the event loop and releases internal resources. Safe to call
@@ -357,6 +459,12 @@ private:
                                     uint64_t corr_id,
                                     std::string caller_addr);
     void on_forward_result_received(uint64_t corr_id, int rv);
+
+    // Iterator support — all accessed only from the event loop ULT except
+    // push_to_iterators which is called from apply_committed_entries().
+    void handle_iter_register(std::shared_ptr<LogIterator::Impl> impl);
+    void push_to_iterators(raft_index idx, const char* base, size_t len);
+    std::vector<std::shared_ptr<LogIterator::Impl>> active_iterators_;
 };
 
 } // namespace mraft
