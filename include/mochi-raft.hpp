@@ -12,6 +12,7 @@ extern "C" {
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -34,6 +35,7 @@ enum class IsolationMode : uint8_t {
 class Storage;
 class Network;
 class EventQueue;
+struct OwnedEvent;
 
 /**
  * @brief User-provided finite state machine.
@@ -214,6 +216,7 @@ public:
      * @return 0 on success, RAFT_NOTLEADER if this node is not the leader.
      */
     int submit(MochiRaftBuffer&& buf,
+               bool forward = true,
                std::function<void(int)> on_applied = {});
 
     /**
@@ -342,6 +345,18 @@ private:
         std::function<void(int)> fn;
     };
     std::map<raft_index, PendingCallback> pending_callbacks_;
+
+    // Forward-submit state: maps correlation ID → user callback on the
+    // originating follower; protected by forward_mutex_.
+    std::mutex                                   forward_mutex_;
+    std::map<uint64_t, std::function<void(int)>> forward_pending_;
+    std::atomic<uint64_t>                        next_corr_id_{1};
+
+    void handle_forward(OwnedEvent& owned);
+    void on_forward_submit_received(std::vector<uint8_t> data,
+                                    uint64_t corr_id,
+                                    std::string caller_addr);
+    void on_forward_result_received(uint64_t corr_id, int rv);
 };
 
 } // namespace mraft

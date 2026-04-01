@@ -157,6 +157,7 @@ TEST_F(SingleNodeTest, SubmitWithCallback) {
     const char* data = "callback-test";
     ASSERT_EQ(server_->submit(
         mraft::MochiRaftBuffer{data, strlen(data)},
+        true,
         [&](int rv) { callback_rv.store(rv); }), 0);
 
     deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);

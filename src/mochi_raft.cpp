@@ -34,6 +34,15 @@ MochiRaftServer::MochiRaftServer(tl::engine& engine,
         engine, provider_id, id, address_,
         [this](struct raft_message* msg) { on_receive(msg); },
         std::move(rpc_pool));
+
+    network_->set_forward_submit_cb(
+        [this](std::vector<uint8_t> data, uint64_t corr_id, std::string caller) {
+            on_forward_submit_received(std::move(data), corr_id,
+                                       std::move(caller));
+        });
+    network_->set_forward_result_cb([this](uint64_t corr_id, int rv) {
+        on_forward_result_received(corr_id, rv);
+    });
 }
 
 MochiRaftServer::~MochiRaftServer() {
@@ -155,6 +164,12 @@ void MochiRaftServer::event_loop() {
         auto owned = queue_->pop(wait_ms);
 
         if (!running_.load()) break;
+
+        // Forward-submit events bypass raft_step() entirely.
+        if (owned && owned->is_forward) {
+            handle_forward(*owned);
+            continue;
+        }
 
         struct raft_event event;
         if (owned) {
@@ -312,7 +327,34 @@ void MochiRaftServer::apply_committed_entries() {
 }
 
 int MochiRaftServer::submit(MochiRaftBuffer&& buf,
+                             bool forward,
                              std::function<void(int)> on_applied) {
+    bool is_leader =
+        (raft_state(const_cast<struct raft*>(&raft_)) == RAFT_LEADER);
+
+    if (!is_leader) {
+        if (!forward) return RAFT_NOTLEADER;
+
+        auto [leader_id, leader_addr] = leader();
+        if (leader_addr.empty()) return RAFT_NOTLEADER;
+
+        uint64_t corr_id = next_corr_id_.fetch_add(1);
+        if (on_applied) {
+            std::lock_guard<std::mutex> lock(forward_mutex_);
+            forward_pending_[corr_id] = std::move(on_applied);
+        }
+
+        auto owned           = std::make_unique<OwnedEvent>();
+        owned->is_forward    = true;
+        owned->forward_dest  = leader_addr;
+        owned->forward_data.assign(
+            static_cast<const uint8_t*>(buf.data()),
+            static_cast<const uint8_t*>(buf.data()) + buf.size());
+        owned->forward_corr_id = corr_id;
+        queue_->push(std::move(owned));
+        return 0;
+    }
+
     size_t len  = buf.size();
     void*  base = buf.release();   // take ownership; buf will no longer free it
     if (!base) return RAFT_NOMEM;
@@ -391,6 +433,49 @@ int MochiRaftServer::transfer(raft_id target_id) {
     event.transfer.server_id = target_id;
     queue_->push(event);
     return 0;
+}
+
+void MochiRaftServer::handle_forward(OwnedEvent& owned) {
+    try {
+        network_->send_forward_submit(owned.forward_dest, owned.forward_data,
+                                      owned.forward_corr_id, address_);
+    } catch (...) {
+        // Send failed — fire the pending callback with an error.
+        std::function<void(int)> cb;
+        {
+            std::lock_guard<std::mutex> lock(forward_mutex_);
+            auto it = forward_pending_.find(owned.forward_corr_id);
+            if (it != forward_pending_.end()) {
+                cb = std::move(it->second);
+                forward_pending_.erase(it);
+            }
+        }
+        if (cb) cb(RAFT_NOTLEADER);
+    }
+}
+
+void MochiRaftServer::on_forward_submit_received(
+        std::vector<uint8_t> data, uint64_t corr_id, std::string caller_addr) {
+    MochiRaftBuffer buf(reinterpret_cast<const char*>(data.data()), data.size());
+    int rv = submit(std::move(buf), false,
+        [this, corr_id, caller_addr](int result) {
+            network_->send_forward_result(caller_addr, corr_id, result);
+        });
+    if (rv != 0)
+        network_->send_forward_result(caller_addr, corr_id, rv);
+}
+
+void MochiRaftServer::on_forward_result_received(uint64_t corr_id, int rv) {
+    std::function<void(int)> cb;
+    {
+        std::lock_guard<std::mutex> lock(forward_mutex_);
+        auto it = forward_pending_.find(corr_id);
+        if (it != forward_pending_.end()) {
+            cb = std::move(it->second);
+            forward_pending_.erase(it);
+        }
+    }
+    if (cb) cb(rv);
 }
 
 } // namespace mraft

@@ -248,6 +248,7 @@ TEST_F(ClusterTest, SubmitWithCallback) {
     const char* data = "cluster-callback-test";
     ASSERT_EQ(servers_[leader]->submit(
         mraft::MochiRaftBuffer{data, strlen(data)},
+        true,
         [&](int rv) { callback_rv.store(rv); }), 0);
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
@@ -306,6 +307,49 @@ TEST_F(ClusterTest, IsolateLeaderNewElection) {
 
     EXPECT_EQ(servers_[old_leader]->state(), RAFT_FOLLOWER)
         << "Old leader did not rejoin as follower after deisolation";
+
+    for (int i = 0; i < N; i++) {
+        servers_[i]->shutdown();
+    }
+}
+
+TEST_F(ClusterTest, ForwardSubmit) {
+    create_and_bootstrap();
+
+    for (int i = 0; i < N; i++) {
+        ASSERT_EQ(servers_[i]->start(), 0);
+    }
+
+    ASSERT_TRUE(wait_for_leader());
+    int leader = find_leader();
+    ASSERT_GE(leader, 0);
+
+    int follower = -1;
+    for (int i = 0; i < N; i++) {
+        if (i != leader) { follower = i; break; }
+    }
+    ASSERT_GE(follower, 0);
+
+    // forward=false on a follower must fail immediately
+    {
+        const char* d = "no-forward";
+        EXPECT_NE(servers_[follower]->submit(
+            mraft::MochiRaftBuffer{d, strlen(d)}, false), 0);
+    }
+
+    // forward=true on a follower must forward to the leader and invoke callback
+    std::atomic<int> callback_rv{-1};
+    const char* data = "forwarded-entry";
+    ASSERT_EQ(servers_[follower]->submit(
+        mraft::MochiRaftBuffer{data, strlen(data)}, true,
+        [&](int rv) { callback_rv.store(rv); }), 0);
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    while (callback_rv.load() == -1 &&
+           std::chrono::steady_clock::now() < deadline)
+        yield_ms(10);
+
+    EXPECT_EQ(callback_rv.load(), 0);
 
     for (int i = 0; i < N; i++) {
         servers_[i]->shutdown();

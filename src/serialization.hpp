@@ -479,4 +479,23 @@ inline void free_message_entries(struct raft_message& msg) {
     }
 }
 
+// Arguments for the forward-submit RPC (follower → leader).
+struct ForwardSubmitArgs {
+    std::vector<uint8_t> data;
+    uint64_t             corr_id        = 0;
+    std::string          caller_address;
+
+    template <typename Archive>
+    void serialize(Archive& ar) { ar(data, corr_id, caller_address); }
+};
+
+// Arguments for the forward-result RPC (leader → follower).
+struct ForwardResultArgs {
+    uint64_t corr_id = 0;
+    int32_t  rv      = 0;
+
+    template <typename Archive>
+    void serialize(Archive& ar) { ar(corr_id, rv); }
+};
+
 } // namespace mraft

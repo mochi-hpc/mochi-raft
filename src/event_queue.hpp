@@ -11,6 +11,8 @@ extern "C" {
 #include <cstdint>
 #include <memory>
 #include <cstring>
+#include <string>
+#include <vector>
 
 namespace tl = thallium;
 
@@ -37,6 +39,13 @@ struct OwnedEvent {
 
     // Optional completion callback for RAFT_SUBMIT events.
     std::function<void(int)> on_applied;
+
+    // For forward-submit events (is_forward=true): these bypass raft_step()
+    // and are dispatched as RPCs to the leader from inside the event loop ULT.
+    bool                 is_forward      = false;
+    std::string          forward_dest;
+    std::vector<uint8_t> forward_data;
+    uint64_t             forward_corr_id = 0;
 
     OwnedEvent() { memset(&event, 0, sizeof(event)); }
 };

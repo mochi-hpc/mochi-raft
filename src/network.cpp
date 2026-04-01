@@ -14,6 +14,10 @@ Network::Network(tl::engine& engine, uint16_t provider_id,
     , on_receive_(std::move(on_receive))
     , rpc_(define("mochi_raft_message", &Network::on_message_rpc, rpc_pool))
     , rpc_rdma_(define("mochi_raft_message_rdma", &Network::on_message_rdma_rpc, rpc_pool))
+    , rpc_forward_submit_(define("mochi_raft_forward_submit",
+                                 &Network::on_forward_submit_rpc, rpc_pool))
+    , rpc_forward_result_(define("mochi_raft_forward_result",
+                                 &Network::on_forward_result_rpc, rpc_pool))
 {
 }
 
@@ -236,6 +240,56 @@ void Network::on_message_rdma_rpc(const tl::request& req,
 
     on_receive_(msg);
     req.respond(true);
+}
+
+void Network::set_forward_submit_cb(forward_submit_cb_t cb) {
+    forward_submit_cb_ = std::move(cb);
+}
+
+void Network::set_forward_result_cb(forward_result_cb_t cb) {
+    forward_result_cb_ = std::move(cb);
+}
+
+void Network::on_forward_submit_rpc(ForwardSubmitArgs& args) {
+    if (forward_submit_cb_)
+        forward_submit_cb_(std::move(args.data), args.corr_id,
+                           std::move(args.caller_address));
+}
+
+void Network::on_forward_result_rpc(ForwardResultArgs& args) {
+    if (forward_result_cb_)
+        forward_result_cb_(args.corr_id, static_cast<int>(args.rv));
+}
+
+void Network::send_forward_submit(const std::string& dest,
+                                   const std::vector<uint8_t>& data,
+                                   uint64_t corr_id,
+                                   const std::string& caller_address) {
+    ForwardSubmitArgs args;
+    args.data           = data;
+    args.corr_id        = corr_id;
+    args.caller_address = caller_address;
+    try {
+        auto ep = lookup_endpoint(dest);
+        rpc_forward_submit_.on(tl::provider_handle(ep, get_provider_id()))(args);
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[mochi-raft] forward_submit to %s failed: %s\n",
+                dest.c_str(), e.what());
+    }
+}
+
+void Network::send_forward_result(const std::string& dest,
+                                   uint64_t corr_id, int rv) {
+    ForwardResultArgs args;
+    args.corr_id = corr_id;
+    args.rv      = static_cast<int32_t>(rv);
+    try {
+        auto ep = lookup_endpoint(dest);
+        rpc_forward_result_.on(tl::provider_handle(ep, get_provider_id()))(args);
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[mochi-raft] forward_result to %s failed: %s\n",
+                dest.c_str(), e.what());
+    }
 }
 
 } // namespace mraft
