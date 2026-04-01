@@ -32,7 +32,7 @@ public:
 
     Network(tl::engine& engine, uint16_t provider_id,
             raft_id local_id, const std::string& local_address,
-            receive_cb_t on_receive);
+            receive_cb_t on_receive, tl::pool rpc_pool);
     ~Network();
 
     // Send messages returned by raft_step's update.

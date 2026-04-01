@@ -7,6 +7,7 @@ extern "C" {
 #include <raft.h>
 }
 
+#include <cstring>
 #include <map>
 #include <memory>
 #include <string>
@@ -55,6 +56,72 @@ struct Fsm {
 };
 
 /**
+ * @brief A buffer allocated with raft_malloc, for zero-copy submit().
+ *
+ * Callers can allocate a MochiRaftBuffer, fill it directly, and pass it
+ * to submit() as an rvalue. submit() steals the raft_malloc allocation
+ * without copying, so the payload travels from the caller's buffer straight
+ * into the raft log entry.
+ *
+ * The size-only constructor allocates an uninitialized buffer that the caller
+ * fills in place. The (data, size) and string_view constructors copy their
+ * input into a fresh raft_malloc buffer, useful when the source is not
+ * already in a raft_malloc region.
+ */
+class MochiRaftBuffer {
+public:
+    explicit MochiRaftBuffer(size_t size)
+        : data_(raft_malloc(size)), size_(size) {}
+
+    MochiRaftBuffer(const char* data, size_t size)
+        : MochiRaftBuffer(size) {
+        if (data_) memcpy(data_, data, size);
+    }
+
+    MochiRaftBuffer(std::string_view sv)
+        : MochiRaftBuffer(sv.data(), sv.size()) {}
+
+    ~MochiRaftBuffer() { raft_free(data_); }
+
+    MochiRaftBuffer(const MochiRaftBuffer&)            = delete;
+    MochiRaftBuffer& operator=(const MochiRaftBuffer&) = delete;
+
+    MochiRaftBuffer(MochiRaftBuffer&& other) noexcept
+        : data_(other.data_), size_(other.size_) {
+        other.data_ = nullptr;
+        other.size_ = 0;
+    }
+
+    MochiRaftBuffer& operator=(MochiRaftBuffer&& other) noexcept {
+        if (this != &other) {
+            raft_free(data_);
+            data_ = other.data_;
+            size_ = other.size_;
+            other.data_ = nullptr;
+            other.size_ = 0;
+        }
+        return *this;
+    }
+
+    void*       data()       { return data_; }
+    const void* data() const { return data_; }
+    size_t      size() const { return size_; }
+
+    /// Transfer ownership of the buffer to the caller.
+    /// After this call the MochiRaftBuffer is empty and will not free anything.
+    void* release() noexcept {
+        void* p = data_;
+        data_   = nullptr;
+        size_   = 0;
+        return p;
+    }
+
+private:
+    void*  data_;
+    size_t size_;
+};
+
+/**
  * @brief Options for submit() controlling the replication transport.
  */
 struct SubmitOptions {
@@ -67,13 +134,14 @@ struct SubmitOptions {
  *
  * Wraps c-raft's step-based API (raft_step()) with Mochi components:
  * Thallium for network transport and ABT-IO for persistent I/O.
- * An internal event loop runs as an Argobots ULT on the engine's handler
- * pool, driving elections, replication, and log persistence.
+ * An internal event loop runs as an Argobots ULT on the supplied loop pool,
+ * driving elections, replication, and log persistence.
  *
  * Typical lifecycle:
  * @code
- *   MochiRaftServer server(engine, abt_io, id, addr, dir, fsm);
- *   server.bootstrap({{1, addr1}, {2, addr2}, {3, addr3}});
+ *   auto pool = engine.get_handler_pool();
+ *   MochiRaftServer server(engine, abt_io, id, pool, pool, dir, fsm);
+ *   server.bootstrap({{1, engine1.self()}, {2, engine2.self()}, ...});
  *   server.start();
  *   // ... submit(), state(), commit_index() ...
  *   server.shutdown();
@@ -86,11 +154,14 @@ public:
      *
      * Allocates internal storage, network, and event queue components but
      * does not start the event loop. Call bootstrap() then start().
+     * The server's Thallium address is derived automatically from
+     * `engine.self()`.
      *
      * @param engine      Thallium engine (must outlive the server).
      * @param abt_io      ABT-IO instance for persistent I/O.
      * @param id          Unique Raft server ID (must be > 0).
-     * @param address     This server's Thallium address (e.g. "na+sm://...").
+     * @param loop_pool   Argobots pool on which the event loop ULT runs.
+     * @param rpc_pool    Argobots pool on which incoming RPC handlers execute.
      * @param data_dir    Directory for persistent storage (created if absent).
      * @param fsm         User-provided state machine (must outlive the server).
      * @param provider_id Thallium provider ID, allowing multiple Raft groups
@@ -99,7 +170,8 @@ public:
     MochiRaftServer(tl::engine& engine,
                     abt_io_instance_id abt_io,
                     raft_id id,
-                    const std::string& address,
+                    tl::pool loop_pool,
+                    tl::pool rpc_pool,
                     const std::string& data_dir,
                     Fsm& fsm,
                     uint16_t provider_id = 0);
@@ -136,13 +208,11 @@ public:
      * The entry will be committed once a majority of the cluster has
      * persisted it, then applied to the FSM.
      *
-     * @param data Pointer to the entry payload.
-     * @param len  Size of the payload in bytes.
+     * @param data The entry payload.
      * @param opts Transport options (use_rdma, timeout_s).
      * @return 0 on success, RAFT_NOTLEADER if this node is not the leader.
      */
-    int submit(const void* data, size_t len,
-               const SubmitOptions& opts = {});
+    int submit(MochiRaftBuffer&& buf, const SubmitOptions& opts = {});
 
     /**
      * @brief Get this server's Raft ID.
@@ -170,6 +240,27 @@ public:
      * @note Not thread-safe; intended for polling from outside the event loop.
      */
     raft_index commit_index() const;
+
+    /**
+     * @brief Get the current cluster membership as seen by this server.
+     *
+     * Returns all servers in the committed configuration.
+     *
+     * @return Vector of (server_id, address) pairs.
+     * @note Not thread-safe; intended for polling from outside the event loop.
+     */
+    std::vector<std::pair<raft_id, std::string>> members() const;
+
+    /**
+     * @brief Get the current leader as seen by this server.
+     *
+     * Returns the ID and address of the node this server believes to be the
+     * current leader. If no leader is known, id is 0 and address is empty.
+     *
+     * @return (leader_id, leader_address) pair.
+     * @note Not thread-safe; intended for polling from outside the event loop.
+     */
+    std::pair<raft_id, std::string> leader() const;
 
     /**
      * @brief Set the network isolation mode.
@@ -211,7 +302,8 @@ private:
     tl::engine& engine_;
     Fsm& fsm_;
     raft_id id_;
-    std::string address_;
+    std::string address_;  ///< Derived from engine.self() at construction time.
+    tl::pool loop_pool_;   ///< Pool on which the event loop ULT runs.
 
     std::unique_ptr<Storage> storage_;
     std::unique_ptr<Network> network_;

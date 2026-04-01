@@ -75,8 +75,9 @@ static void yield_ms(int ms) {
 }
 
 TEST_F(SingleNodeTest, BootstrapStartAndBecomeLeader) {
+    auto pool = engine_->get_handler_pool();
     server_ = std::make_unique<mraft::MochiRaftServer>(
-        *engine_, abt_io_, 1, address_, test_dir_, fsm_);
+        *engine_, abt_io_, 1, pool, pool, test_dir_, fsm_);
 
     // Bootstrap with single server
     ASSERT_EQ(server_->bootstrap({{1, address_}}), 0);
@@ -100,8 +101,9 @@ TEST_F(SingleNodeTest, BootstrapStartAndBecomeLeader) {
 }
 
 TEST_F(SingleNodeTest, SubmitEntry) {
+    auto pool = engine_->get_handler_pool();
     server_ = std::make_unique<mraft::MochiRaftServer>(
-        *engine_, abt_io_, 1, address_, test_dir_, fsm_);
+        *engine_, abt_io_, 1, pool, pool, test_dir_, fsm_);
 
     ASSERT_EQ(server_->bootstrap({{1, address_}}), 0);
     ASSERT_EQ(server_->start(), 0);
@@ -117,7 +119,7 @@ TEST_F(SingleNodeTest, SubmitEntry) {
 
     // Submit an entry
     const char* data = "hello mochi-raft";
-    ASSERT_EQ(server_->submit(data, strlen(data)), 0);
+    ASSERT_EQ(server_->submit(mraft::MochiRaftBuffer{data, strlen(data)}), 0);
 
     // Wait for commit index to advance (entry should be committed quickly)
     raft_index initial_commit = server_->commit_index();

@@ -7,13 +7,13 @@ namespace mraft {
 
 Network::Network(tl::engine& engine, uint16_t provider_id,
                  raft_id local_id, const std::string& local_address,
-                 receive_cb_t on_receive)
+                 receive_cb_t on_receive, tl::pool rpc_pool)
     : tl::provider<Network>(engine, provider_id)
     , local_id_(local_id)
     , local_address_(local_address)
     , on_receive_(std::move(on_receive))
-    , rpc_(define("mochi_raft_message", &Network::on_message_rpc))
-    , rpc_rdma_(define("mochi_raft_message_rdma", &Network::on_message_rdma_rpc))
+    , rpc_(define("mochi_raft_message", &Network::on_message_rpc, rpc_pool))
+    , rpc_rdma_(define("mochi_raft_message_rdma", &Network::on_message_rdma_rpc, rpc_pool))
 {
 }
 

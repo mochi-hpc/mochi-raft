@@ -83,9 +83,10 @@ protected:
         }
 
         for (int i = 0; i < N; i++) {
+            auto pool = engines_[i]->get_handler_pool();
             servers_[i] = std::make_unique<mraft::MochiRaftServer>(
                 *engines_[i], abt_io_, static_cast<raft_id>(i + 1),
-                addrs_[i], dirs_[i], fsms_[i]);
+                pool, pool, dirs_[i], fsms_[i]);
         }
 
         // Bootstrap all nodes with the same cluster configuration
@@ -166,7 +167,7 @@ TEST_F(ClusterTest, SubmitAndReplicate) {
 
     // Submit an entry on the leader
     const char* data = "replicated-data";
-    ASSERT_EQ(servers_[leader]->submit(data, strlen(data)), 0);
+    ASSERT_EQ(servers_[leader]->submit(mraft::MochiRaftBuffer{data, strlen(data)}), 0);
 
     // Wait for commit index to advance on the leader
     raft_index initial = servers_[leader]->commit_index();

@@ -112,8 +112,9 @@ int main() {
             }
 
             // Create server
+            auto pool = engine->get_handler_pool();
             server = std::make_unique<mraft::MochiRaftServer>(
-                *engine, abt_io, my_id, my_address, data_dir, fsm);
+                *engine, abt_io, my_id, pool, pool, data_dir, fsm);
 
             int rv = server->bootstrap(cluster);
             if (rv != 0) {
@@ -177,7 +178,7 @@ int main() {
             std::string entry = "PUT " + put_tokens[1] + " " + put_tokens[2];
 
             auto commit_before = server->commit_index();
-            int rv = server->submit(entry.data(), entry.size());
+            int rv = server->submit(mraft::MochiRaftBuffer{entry});
             if (rv != 0) {
                 if (rv == RAFT_NOTLEADER) {
                     respond(proto::err("NOTLEADER"));

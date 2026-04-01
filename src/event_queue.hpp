@@ -15,9 +15,16 @@ namespace tl = thallium;
 
 namespace mraft {
 
-// Wraps a raft_event along with any heap-allocated data it references.
+// Wraps a raft_event together with the heap-allocated data it points into.
+//
+// A bare raft_event is a plain C struct that holds raw pointers but owns
+// nothing — the caller must keep the referenced memory alive. OwnedEvent
+// adds unique_ptr members that express ownership of that memory, so the
+// data is freed automatically when the OwnedEvent is destroyed.
+//
 // For RAFT_SUBMIT events, owns the entry and its buffer data.
-// For RAFT_RECEIVE events, owns the raft_message.
+// For RAFT_RECEIVE events, the message is already owned by Network and
+// freed by c-raft after processing — no extra ownership needed here.
 struct OwnedEvent {
     struct raft_event event;
 

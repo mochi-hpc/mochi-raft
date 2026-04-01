@@ -49,7 +49,8 @@ TEST_F(NetworkTest, SendRequestVote) {
 
     net1_ = std::make_unique<mraft::Network>(
         *engine1_, 0, 1, addr1_,
-        [](struct raft_message* msg) { delete msg; });
+        [](struct raft_message* msg) { delete msg; },
+        engine1_->get_handler_pool());
 
     net2_ = std::make_unique<mraft::Network>(
         *engine2_, 0, 2, addr2_,
@@ -60,7 +61,8 @@ TEST_F(NetworkTest, SendRequestVote) {
                 raft_free(const_cast<char*>(msg->server_address));
             delete msg;
             received.store(true);
-        });
+        },
+        engine2_->get_handler_pool());
 
     // Send RequestVote from engine1 to engine2
     struct raft_message msg;
@@ -104,7 +106,8 @@ TEST_F(NetworkTest, SendAppendEntriesWithEntries) {
 
     net1_ = std::make_unique<mraft::Network>(
         *engine1_, 0, 1, addr1_,
-        [](struct raft_message* msg) { delete msg; });
+        [](struct raft_message* msg) { delete msg; },
+        engine1_->get_handler_pool());
 
     net2_ = std::make_unique<mraft::Network>(
         *engine2_, 0, 2, addr2_,
@@ -114,7 +117,8 @@ TEST_F(NetworkTest, SendAppendEntriesWithEntries) {
                 raft_free(const_cast<char*>(msg->server_address));
             delete msg;
             received.store(true);
-        });
+        },
+        engine2_->get_handler_pool());
 
     // Create entries
     struct raft_entry entries[2];
@@ -179,11 +183,13 @@ TEST_F(NetworkTest, SendRequestVoteResult) {
                 raft_free(const_cast<char*>(msg->server_address));
             delete msg;
             received.store(true);
-        });
+        },
+        engine1_->get_handler_pool());
 
     net2_ = std::make_unique<mraft::Network>(
         *engine2_, 0, 2, addr2_,
-        [](struct raft_message* msg) { delete msg; });
+        [](struct raft_message* msg) { delete msg; },
+        engine2_->get_handler_pool());
 
     struct raft_message msg;
     memset(&msg, 0, sizeof(msg));
@@ -219,7 +225,8 @@ TEST_F(NetworkTest, SendTimeoutNow) {
 
     net1_ = std::make_unique<mraft::Network>(
         *engine1_, 0, 1, addr1_,
-        [](struct raft_message* msg) { delete msg; });
+        [](struct raft_message* msg) { delete msg; },
+        engine1_->get_handler_pool());
 
     net2_ = std::make_unique<mraft::Network>(
         *engine2_, 0, 2, addr2_,
@@ -229,7 +236,8 @@ TEST_F(NetworkTest, SendTimeoutNow) {
                 raft_free(const_cast<char*>(msg->server_address));
             delete msg;
             received.store(true);
-        });
+        },
+        engine2_->get_handler_pool());
 
     struct raft_message msg;
     memset(&msg, 0, sizeof(msg));

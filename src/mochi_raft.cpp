@@ -15,22 +15,25 @@ static raft_time now_ms() {
 MochiRaftServer::MochiRaftServer(tl::engine& engine,
                                  abt_io_instance_id abt_io,
                                  raft_id id,
-                                 const std::string& address,
+                                 tl::pool loop_pool,
+                                 tl::pool rpc_pool,
                                  const std::string& data_dir,
                                  Fsm& fsm,
                                  uint16_t provider_id)
     : engine_(engine)
     , fsm_(fsm)
     , id_(id)
-    , address_(address)
+    , address_(static_cast<std::string>(engine.self()))
+    , loop_pool_(std::move(loop_pool))
 {
     memset(&raft_, 0, sizeof(raft_));
 
     storage_ = std::make_unique<Storage>(abt_io, data_dir);
     queue_ = std::make_unique<EventQueue>();
     network_ = std::make_unique<Network>(
-        engine, provider_id, id, address,
-        [this](struct raft_message* msg) { on_receive(msg); });
+        engine, provider_id, id, address_,
+        [this](struct raft_message* msg) { on_receive(msg); },
+        std::move(rpc_pool));
 }
 
 MochiRaftServer::~MochiRaftServer() {
@@ -115,8 +118,7 @@ int MochiRaftServer::start() {
     // Start the event loop on the engine's handler pool
     running_.store(true);
 
-    loop_thread_ = engine_.get_handler_pool().make_thread(
-        [this]() { event_loop(); });
+    loop_thread_ = loop_pool_.make_thread([this]() { event_loop(); });
 
     return 0;
 }
@@ -302,20 +304,20 @@ void MochiRaftServer::apply_committed_entries() {
     }
 }
 
-int MochiRaftServer::submit(const void* data, size_t len,
-                             const SubmitOptions& opts) {
-    // Create an owned event with heap-allocated entry data
+int MochiRaftServer::submit(MochiRaftBuffer&& buf, const SubmitOptions& opts) {
+    size_t len  = buf.size();
+    void*  base = buf.release();   // take ownership; buf will no longer free it
+    if (!base) return RAFT_NOMEM;
+
     auto owned = std::make_unique<OwnedEvent>();
     owned->submit_entry = std::make_unique<struct raft_entry>();
     memset(owned->submit_entry.get(), 0, sizeof(struct raft_entry));
 
-    owned->submit_entry->term = raft_current_term(&raft_);
-    owned->submit_entry->type = RAFT_COMMAND;
-    owned->submit_entry->buf.base = raft_malloc(len);
-    if (!owned->submit_entry->buf.base) return RAFT_NOMEM;
-    memcpy(owned->submit_entry->buf.base, data, len);
-    owned->submit_entry->buf.len = len;
-    owned->submit_entry->batch = owned->submit_entry->buf.base;
+    owned->submit_entry->term      = raft_current_term(&raft_);
+    owned->submit_entry->type      = RAFT_COMMAND;
+    owned->submit_entry->buf.base  = base;
+    owned->submit_entry->buf.len   = len;
+    owned->submit_entry->batch     = base;  // c-raft frees via batch pointer
 
     owned->event.type = RAFT_SUBMIT;
     owned->event.time = now_ms();
@@ -344,6 +346,23 @@ raft_term MochiRaftServer::current_term() const {
 
 raft_index MochiRaftServer::commit_index() const {
     return raft_commit_index(const_cast<struct raft*>(&raft_));
+}
+
+std::vector<std::pair<raft_id, std::string>> MochiRaftServer::members() const {
+    std::vector<std::pair<raft_id, std::string>> result;
+    const auto& conf = raft_.configuration;
+    for (unsigned i = 0; i < conf.n; i++) {
+        result.push_back({conf.servers[i].id,
+                          conf.servers[i].address ? conf.servers[i].address : ""});
+    }
+    return result;
+}
+
+std::pair<raft_id, std::string> MochiRaftServer::leader() const {
+    raft_id id = 0;
+    const char* address = nullptr;
+    raft_leader(const_cast<struct raft*>(&raft_), &id, &address);
+    return {id, address ? address : ""};
 }
 
 void MochiRaftServer::set_isolation(IsolationMode mode) {
