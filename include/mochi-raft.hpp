@@ -134,6 +134,30 @@ struct Fsm {
      * @return 0 on success, non-zero on error.
      */
     virtual int apply(std::string_view data) = 0;
+
+    /**
+     * @brief Serialise the current FSM state into a snapshot buffer.
+     *
+     * Called from the event loop ULT when a snapshot is due. The
+     * implementation should write its entire state into @p data.
+     * Returning RAFT_NOTFOUND (the default) disables snapshotting.
+     *
+     * @param data Output buffer to fill with the snapshot bytes.
+     * @return 0 on success, RAFT_NOTFOUND to opt out, non-zero on error.
+     */
+    virtual int snapshot(std::string& data) { return RAFT_NOTFOUND; }
+
+    /**
+     * @brief Restore FSM state from a snapshot buffer.
+     *
+     * Called on startup when a persisted snapshot is found, and on
+     * followers when an InstallSnapshot RPC is received from the leader.
+     * The default implementation returns RAFT_NOTFOUND.
+     *
+     * @param data The snapshot bytes produced by snapshot().
+     * @return 0 on success, non-zero on error.
+     */
+    virtual int restore(std::string_view data) { return RAFT_NOTFOUND; }
 };
 
 /**
@@ -384,6 +408,29 @@ public:
     int transfer(raft_id target_id);
 
     /**
+     * @brief Set the number of committed entries between automatic snapshots.
+     *
+     * Once @p n entries have been applied since the last snapshot, the
+     * server calls Fsm::snapshot(), persists the result, and notifies
+     * c-raft so it can compact the log. Set to 0 to disable auto-snapshots.
+     * Default: 1024. Must be called before start().
+     *
+     * @param n Entries between snapshots.
+     */
+    void set_snapshot_threshold(unsigned n);
+
+    /**
+     * @brief Set the number of log entries to retain after a snapshot.
+     *
+     * Keeping a trailing window of entries avoids sending full snapshots
+     * to followers that are only slightly behind. Default: 128.
+     * Must be called before start().
+     *
+     * @param n Trailing entries to keep.
+     */
+    void set_snapshot_trailing(unsigned n);
+
+    /**
      * @brief Obtain a forward iterator over committed log entries.
      *
      * Only RAFT_COMMAND entries are surfaced; configuration and barrier entries
@@ -436,7 +483,11 @@ private:
     tl::managed<tl::thread> loop_thread_;
     std::atomic<bool> running_{false};
 
-    raft_index last_applied_ = 0; ///< Tracks the last log index applied to the FSM.
+    raft_index last_applied_         = 0; ///< Tracks the last log index applied to the FSM.
+    raft_index last_snapshot_index_  = 0; ///< Index of the most recently taken snapshot.
+    unsigned   snapshot_threshold_   = 1024; ///< Entries between automatic snapshots.
+    unsigned   snapshot_trailing_    = 128;  ///< Log entries to retain after a snapshot.
+    std::string incoming_snapshot_buf_; ///< Accumulates InstallSnapshot chunks.
 
     size_t rdma_threshold_ = SIZE_MAX; ///< Byte threshold above which RDMA is used (default: disabled).
     double min_timeout_ms_ = 5000.0;   ///< Minimum RDMA timeout in milliseconds.
@@ -453,6 +504,9 @@ private:
     std::mutex                                   forward_mutex_;
     std::map<uint64_t, std::function<void(int)>> forward_pending_;
     std::atomic<uint64_t>                        next_corr_id_{1};
+
+    void maybe_take_snapshot();
+    void do_take_snapshot();
 
     void handle_forward(OwnedEvent& owned);
     void on_forward_submit_received(std::vector<uint8_t> data,

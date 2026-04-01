@@ -26,6 +26,20 @@ static uint64_t get64(const uint8_t* buf) {
     return v;
 }
 
+static void put32(uint8_t* buf, uint32_t v) {
+    for (int i = 0; i < 4; i++) {
+        buf[i] = static_cast<uint8_t>(v >> (i * 8));
+    }
+}
+
+static uint32_t get32(const uint8_t* buf) {
+    uint32_t v = 0;
+    for (int i = 0; i < 4; i++) {
+        v |= static_cast<uint32_t>(buf[i]) << (i * 8);
+    }
+    return v;
+}
+
 Storage::Storage(abt_io_instance_id abt_io, const std::string& dir)
     : abt_io_(abt_io), dir_(dir) {}
 
@@ -559,6 +573,150 @@ int Storage::bootstrap(const struct raft_configuration* conf) {
 
     // Close the segment
     return close_current_segment();
+}
+
+int Storage::snapshot_put(raft_index index, raft_term term,
+                          raft_index conf_index,
+                          const struct raft_configuration& conf,
+                          const char* data, size_t len)
+{
+    // Build the binary image in memory.
+    // Layout: [8 version][8 index][8 term][8 conf_index]
+    //         [4 n_servers] (per server: [8 id][4 role][4 addr_len][addr_len bytes])
+    //         [8 data_len][data_len bytes]
+    std::vector<uint8_t> image;
+    image.reserve(64 + conf.n * 32 + len);
+
+    auto append8 = [&](uint64_t v) {
+        uint8_t tmp[8]; put64(tmp, v); image.insert(image.end(), tmp, tmp + 8);
+    };
+    auto append4 = [&](uint32_t v) {
+        uint8_t tmp[4]; put32(tmp, v); image.insert(image.end(), tmp, tmp + 4);
+    };
+    auto appendBytes = [&](const char* p, size_t n) {
+        image.insert(image.end(), p, p + n);
+    };
+
+    append8(2);                          // format version
+    append8(static_cast<uint64_t>(index));
+    append8(static_cast<uint64_t>(term));
+    append8(static_cast<uint64_t>(conf_index));
+    append4(static_cast<uint32_t>(conf.n));
+    for (unsigned i = 0; i < conf.n; i++) {
+        append8(static_cast<uint64_t>(conf.servers[i].id));
+        append4(static_cast<uint32_t>(conf.servers[i].role));
+        uint32_t alen = conf.servers[i].address
+                        ? static_cast<uint32_t>(strlen(conf.servers[i].address))
+                        : 0;
+        append4(alen);
+        if (alen > 0) appendBytes(conf.servers[i].address, alen);
+    }
+    append8(static_cast<uint64_t>(len));
+    if (len > 0) appendBytes(data, len);
+
+    // Write to tmp file then rename (atomic).
+    std::string tmp_path = dir_ + "/snapshot.tmp";
+    std::string dst_path = dir_ + "/snapshot";
+
+    int fd = abt_io_open(abt_io_, tmp_path.c_str(),
+                         O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return RAFT_IOERR;
+
+    ssize_t nw = abt_io_pwrite(abt_io_, fd, image.data(), image.size(), 0);
+    abt_io_fdatasync(abt_io_, fd);
+    abt_io_close(abt_io_, fd);
+    if (nw != static_cast<ssize_t>(image.size())) return RAFT_IOERR;
+
+    if (rename(tmp_path.c_str(), dst_path.c_str()) != 0) return RAFT_IOERR;
+    return 0;
+}
+
+int Storage::snapshot_get(struct raft_snapshot_metadata& meta, std::string& data)
+{
+    std::string path = dir_ + "/snapshot";
+    int fd = abt_io_open(abt_io_, path.c_str(), O_RDONLY, 0);
+    if (fd < 0) return RAFT_NOTFOUND;
+
+    struct stat st;
+    if (fstat(fd, &st) != 0 || st.st_size < 36) {
+        abt_io_close(abt_io_, fd);
+        return RAFT_IOERR;
+    }
+
+    std::vector<uint8_t> image(static_cast<size_t>(st.st_size));
+    ssize_t nr = abt_io_pread(abt_io_, fd, image.data(), image.size(), 0);
+    abt_io_close(abt_io_, fd);
+    if (nr != static_cast<ssize_t>(image.size())) return RAFT_IOERR;
+
+    const uint8_t* p = image.data();
+    const uint8_t* end = p + image.size();
+
+    auto read8 = [&]() -> uint64_t {
+        if (p + 8 > end) return 0;
+        uint64_t v = get64(p); p += 8; return v;
+    };
+    auto read4 = [&]() -> uint32_t {
+        if (p + 4 > end) return 0;
+        uint32_t v = get32(p); p += 4; return v;
+    };
+
+    uint64_t version = read8();
+    if (version != 2) return RAFT_IOERR;
+
+    meta.index               = static_cast<raft_index>(read8());
+    meta.term                = static_cast<raft_term>(read8());
+    meta.configuration_index = static_cast<raft_index>(read8());
+
+    uint32_t n_servers = read4();
+    raft_configuration_init(&meta.configuration);
+    for (uint32_t i = 0; i < n_servers; i++) {
+        raft_id   sid  = static_cast<raft_id>(read8());
+        int       role = static_cast<int>(read4());
+        uint32_t  alen = read4();
+        if (p + alen > end) {
+            raft_configuration_close(&meta.configuration);
+            return RAFT_IOERR;
+        }
+        std::string addr(reinterpret_cast<const char*>(p), alen);
+        p += alen;
+        int rv = raft_configuration_add(&meta.configuration, sid, addr.c_str(), role);
+        if (rv != 0) {
+            raft_configuration_close(&meta.configuration);
+            return RAFT_IOERR;
+        }
+    }
+
+    uint64_t data_len = read8();
+    if (p + data_len > end) {
+        raft_configuration_close(&meta.configuration);
+        return RAFT_IOERR;
+    }
+    data.assign(reinterpret_cast<const char*>(p), static_cast<size_t>(data_len));
+    return 0;
+}
+
+int Storage::discard_before(raft_index from_index)
+{
+    if (from_index <= 1) return 0;
+
+    // Evict in-memory cache entries with index < from_index.
+    while (!entry_cache_.empty() && cache_start_index_ < from_index) {
+        if (entry_cache_.front().buf.base)
+            raft_free(entry_cache_.front().buf.base);
+        entry_cache_.erase(entry_cache_.begin());
+        cache_start_index_++;
+    }
+
+    // Delete closed segment files whose last_index < from_index.
+    std::vector<SegmentInfo> segments;
+    scan_segments(segments);
+    for (const auto& seg : segments) {
+        if (seg.first_index == 0) continue;         // open segment — leave it
+        if (seg.last_index < from_index) {
+            abt_io_unlink(abt_io_, seg.path.c_str());
+        }
+    }
+    return 0;
 }
 
 } // namespace mraft

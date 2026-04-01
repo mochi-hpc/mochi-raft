@@ -87,6 +87,17 @@ int MochiRaftServer::start() {
                         &entries, &n_entries);
     if (rv != 0) return rv;
 
+    // Load snapshot if one exists on disk.
+    struct raft_snapshot_metadata snap_meta{};
+    std::string snap_data;
+    bool has_snap = (storage_->snapshot_get(snap_meta, snap_data) == 0);
+    if (has_snap) {
+        fsm_.restore(std::string_view(snap_data));
+        last_applied_        = snap_meta.index;
+        last_snapshot_index_ = snap_meta.index;
+        snap_data.clear();
+    }
+
     // Initialize raft
     rv = raft_init(&raft_, NULL, NULL, id_, address_.c_str());
     if (rv != 0) {
@@ -110,14 +121,16 @@ int MochiRaftServer::start() {
 
     event.type = RAFT_START;
     event.time = now_ms();
-    event.start.term = term;
-    event.start.voted_for = voted_for;
-    event.start.metadata = nullptr;
+    event.start.term        = term;
+    event.start.voted_for   = voted_for;
+    event.start.metadata    = has_snap ? &snap_meta : nullptr;
     event.start.start_index = start_index;
-    event.start.entries = entries;
-    event.start.n_entries = static_cast<unsigned>(n_entries);
+    event.start.entries     = entries;
+    event.start.n_entries   = static_cast<unsigned>(n_entries);
 
     rv = raft_step(&raft_, &event, &update);
+    // c-raft deep-copies snap_meta.configuration internally; release our copy.
+    if (has_snap) raft_configuration_close(&snap_meta.configuration);
     if (rv != 0) {
         raft_close(&raft_, NULL);
         return rv;
@@ -294,7 +307,49 @@ void MochiRaftServer::handle_update(struct raft_update& update) {
         }
     }
 
-    // 4. Apply committed entries
+    // 4. Handle incoming snapshot chunk (InstallSnapshot from leader)
+    if (update.flags & RAFT_UPDATE_SNAPSHOT) {
+        auto& snap = update.snapshot;
+
+        // Accumulate chunk; snap.chunk.base is owned by c-raft, just copy bytes.
+        const char* base = static_cast<const char*>(snap.chunk.base);
+        incoming_snapshot_buf_.append(base, snap.chunk.len);
+
+        if (snap.last) {
+            // All chunks received — persist to disk and restore the FSM.
+            storage_->snapshot_put(
+                snap.metadata.index, snap.metadata.term,
+                snap.metadata.configuration_index, snap.metadata.configuration,
+                incoming_snapshot_buf_.data(), incoming_snapshot_buf_.size());
+
+            fsm_.restore(std::string_view(incoming_snapshot_buf_));
+
+            last_applied_        = snap.metadata.index;
+            last_snapshot_index_ = snap.metadata.index;
+
+            raft_index keep_from = (snap.metadata.index > snapshot_trailing_)
+                ? (snap.metadata.index - snapshot_trailing_ + 1) : 1;
+            storage_->discard_before(keep_from);
+
+            incoming_snapshot_buf_.clear();
+            incoming_snapshot_buf_.shrink_to_fit();
+        }
+
+        // Acknowledge the chunk to c-raft.
+        struct raft_event persisted{};
+        persisted.type                        = RAFT_PERSISTED_SNAPSHOT;
+        persisted.time                        = now_ms();
+        persisted.persisted_snapshot.metadata = snap.metadata;
+        persisted.persisted_snapshot.offset   = snap.offset;
+        persisted.persisted_snapshot.last     = snap.last;
+
+        struct raft_update update2{};
+        memset(&update2, 0, sizeof(update2));
+        int rv2 = raft_step(&raft_, &persisted, &update2);
+        if (rv2 == 0) handle_update(update2);
+    }
+
+    // 5. Apply committed entries
     if (update.flags & RAFT_UPDATE_COMMIT_INDEX) {
         apply_committed_entries();
     }
@@ -338,6 +393,72 @@ void MochiRaftServer::apply_committed_entries() {
 
         last_applied_ = idx;
     }
+
+    maybe_take_snapshot();
+}
+
+void MochiRaftServer::maybe_take_snapshot() {
+    if (snapshot_threshold_ == 0) return;
+    if (last_applied_ == 0) return;
+    if (last_applied_ - last_snapshot_index_ < snapshot_threshold_) return;
+    do_take_snapshot();
+}
+
+void MochiRaftServer::do_take_snapshot() {
+    // Ask the FSM to serialise its state.
+    std::string snap_data;
+    if (fsm_.snapshot(snap_data) != 0) return;  // FSM opted out or failed
+
+    raft_index snap_index = last_applied_;
+
+    // Get the term for snap_index from the in-memory entry cache.
+    const struct raft_entry* entry = nullptr;
+    storage_->get_entries(snap_index, 1, &entry);
+    raft_term snap_term = entry ? entry->term : raft_current_term(&raft_);
+
+    // Use the committed configuration (configuration_committed /
+    // configuration_committed_index are public fields of struct raft).
+    const struct raft_configuration& conf = raft_.configuration_committed;
+    raft_index conf_index = raft_.configuration_committed_index;
+
+    int rv = storage_->snapshot_put(snap_index, snap_term, conf_index, conf,
+                                    snap_data.data(), snap_data.size());
+    if (rv != 0) return;
+
+    // Discard log entries before the trailing window.
+    raft_index keep_from = (snap_index > snapshot_trailing_)
+        ? (snap_index - snapshot_trailing_ + 1) : 1;
+    storage_->discard_before(keep_from);
+
+    // Notify c-raft about the snapshot so it can advance its log trail.
+    // metadata.configuration is a shallow copy into raft_.configuration_committed;
+    // c-raft deep-copies it internally, so no allocation or free is needed here.
+    struct raft_snapshot_metadata metadata{};
+    metadata.index               = snap_index;
+    metadata.term                = snap_term;
+    metadata.configuration       = conf;
+    metadata.configuration_index = conf_index;
+
+    struct raft_event event{};
+    event.type              = RAFT_SNAPSHOT;
+    event.time              = now_ms();
+    event.snapshot.metadata = metadata;
+    event.snapshot.trailing = snapshot_trailing_;
+
+    struct raft_update update{};
+    memset(&update, 0, sizeof(update));
+    rv = raft_step(&raft_, &event, &update);
+    if (rv == 0) handle_update(update);
+
+    last_snapshot_index_ = snap_index;
+}
+
+void MochiRaftServer::set_snapshot_threshold(unsigned n) {
+    snapshot_threshold_ = n;
+}
+
+void MochiRaftServer::set_snapshot_trailing(unsigned n) {
+    snapshot_trailing_ = n;
 }
 
 int MochiRaftServer::submit(MochiRaftBuffer&& buf,

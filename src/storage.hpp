@@ -48,6 +48,21 @@ public:
     // Bootstrap: write initial configuration as the first log entry.
     int bootstrap(const struct raft_configuration* conf);
 
+    // Write a snapshot atomically (snapshot.tmp → snapshot rename).
+    // conf must remain valid for the duration of the call.
+    int snapshot_put(raft_index index, raft_term term,
+                     raft_index conf_index,
+                     const struct raft_configuration& conf,
+                     const char* data, size_t len);
+
+    // Load the latest snapshot.  Returns RAFT_NOTFOUND if none exists.
+    // On success, caller must call raft_configuration_close(&meta.configuration).
+    int snapshot_get(struct raft_snapshot_metadata& meta, std::string& data);
+
+    // Remove in-memory cache entries and closed segment files whose
+    // last_index is strictly less than from_index.
+    int discard_before(raft_index from_index);
+
 private:
     // Metadata
     static constexpr size_t METADATA_SIZE = 32;
