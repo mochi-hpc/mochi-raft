@@ -42,3 +42,9 @@ add_subdirectory(tools)
 # ---------- Tests ----------
 enable_testing()
 add_subdirectory(tests)
+
+# ---------- Examples ----------
+option(ENABLE_EXAMPLES "Build the documentation examples" OFF)
+if(ENABLE_EXAMPLES)
+    add_subdirectory(docs/examples/mochi-raft)
+endif()

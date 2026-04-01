@@ -1,0 +1,2 @@
+add_executable(01_mr_single_node single_node.cpp)
+target_link_libraries(01_mr_single_node mochi-raft)
