@@ -35,6 +35,10 @@ jobs:
         git clone https://github.com/mochi-hpc/mochi-spack-packages
         spack -e tests repo add mochi-spack-packages
 
+    - name: Show environment
+      run: |
+        spack -e tests config blame repos
+
     - name: Install spack environment
       run: |
         spack -e tests install
