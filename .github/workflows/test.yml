@@ -8,8 +8,6 @@ on:
   pull_request:
     branches:
     - main
-  schedule:
-    - cron: "0 0 * * *"
 
 jobs:
   test:
@@ -23,7 +21,7 @@ jobs:
     - name: Setup spack
       uses: spack/setup-spack@v3
       with:
-        spack_ref: v1.1.1
+        spack_ref: develop
 
     - name: Set install root for Spack
       run: |
