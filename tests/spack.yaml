@@ -13,10 +13,6 @@ spack:
   concretizer:
     unify: true
     reuse: true
-  modules:
-    prefix_inspections:
-      lib: [LD_LIBRARY_PATH]
-      lib64: [LD_LIBRARY_PATH]
   mirrors:
     mochi-buildcache:
       url: oci://ghcr.io/mochi-hpc/mochi-spack-buildcache
