@@ -33,8 +33,7 @@ jobs:
     - name: Add mochi-spack-packages
       run: |
         git clone https://github.com/mochi-hpc/mochi-spack-packages
-        ls -l mochi-spack-packages/packages
-        spack -e tests repo add mochi-spack-packages
+        spack repo add mochi-spack-packages
 
     - name: Show environment
       run: |
