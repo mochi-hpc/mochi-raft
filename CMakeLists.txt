@@ -40,8 +40,11 @@ target_link_libraries(mochi-raft
 add_subdirectory(tools)
 
 # ---------- Tests ----------
-enable_testing()
-add_subdirectory(tests)
+option(ENABLE_TESTS "Build the test suite" ON)
+if(ENABLE_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 
 # ---------- Examples ----------
 option(ENABLE_EXAMPLES "Build the documentation examples" OFF)
