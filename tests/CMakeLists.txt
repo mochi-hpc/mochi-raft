@@ -15,6 +15,7 @@ function(mochi_raft_add_test name)
             GTest::gtest_main
             abt-io
             PkgConfig::ABT
+            coverage_config
     )
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
