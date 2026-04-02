@@ -25,6 +25,10 @@ jobs:
       with:
         spack_ref: develop
 
+    - name: Bootstrap spack
+      run: |
+        spack nootstrap now
+
     - name: Set install root for Spack
       run: |
         spack -e tests config add config:install_tree:root:/opt/spack
