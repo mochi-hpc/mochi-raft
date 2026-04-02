@@ -27,7 +27,7 @@ jobs:
 
     - name: Bootstrap spack
       run: |
-        spack nootstrap now
+        spack bootstrap now
 
     - name: Set install root for Spack
       run: |
