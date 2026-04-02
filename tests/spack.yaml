@@ -13,10 +13,10 @@ spack:
   concretizer:
     unify: true
     reuse: true
-#  mirrors:
-#    mochi-buildcache:
-#      url: oci://ghcr.io/mochi-hpc/mochi-spack-buildcache
-#      signed: false
+  mirrors:
+    mochi-buildcache:
+      url: oci://ghcr.io/mochi-hpc/mochi-spack-buildcache
+      signed: false
   config:
     install_tree:
       padded_length: 128
