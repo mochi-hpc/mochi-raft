@@ -78,10 +78,10 @@ private:
     raft_id local_id_;
     std::string local_address_;
     receive_cb_t on_receive_;
-    tl::remote_procedure rpc_;
-    tl::remote_procedure rpc_rdma_;
-    tl::remote_procedure rpc_forward_submit_;
-    tl::remote_procedure rpc_forward_result_;
+    tl::auto_remote_procedure rpc_;
+    tl::auto_remote_procedure rpc_rdma_;
+    tl::auto_remote_procedure rpc_forward_submit_;
+    tl::auto_remote_procedure rpc_forward_result_;
 
     forward_submit_cb_t forward_submit_cb_;
     forward_result_cb_t forward_result_cb_;
