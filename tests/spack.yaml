@@ -2,8 +2,8 @@ spack:
   specs:
   - cmake
   - pkg-config
-  - c-raft@main ~legacy~uv~lz4
-  - mochi-margo ^mercury~boostsys~checksum ^libfabric fabrics=tcp,rxm
+  - mochi.c-raft@main~legacy~uv
+  - mochi-margo^mercury~boostsys~checksum ^libfabric fabrics=tcp,rxm
   - mochi-abt-io
   - mochi-thallium
   modules:
@@ -13,10 +13,13 @@ spack:
   concretizer:
     unify: true
     reuse: true
-#  mirrors:
-#    mochi-buildcache:
-#      url: oci://ghcr.io/mochi-hpc/mochi-spack-buildcache
-#      signed: false
+  mirrors:
+    mochi-buildcache:
+      url: oci://ghcr.io/mochi-hpc/mochi-spack-buildcache
+      signed: false
   config:
     install_tree:
       padded_length: 128
+  repos:
+    mochi:
+      git: https://github.com/mochi-hpc/mochi-spack-packages.git

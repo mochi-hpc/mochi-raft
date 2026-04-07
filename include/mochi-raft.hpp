@@ -493,8 +493,8 @@ private:
     tl::pool loop_pool_;   ///< Pool on which the event loop ULT runs.
 
     std::unique_ptr<Storage> storage_;
-    std::unique_ptr<Network> network_;
     std::unique_ptr<EventQueue> queue_;
+    std::unique_ptr<Network> network_;
 
     tl::managed<tl::thread> loop_thread_;
     std::atomic<bool> running_{false};

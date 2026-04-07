@@ -8,8 +8,6 @@ on:
   pull_request:
     branches:
     - main
-  schedule:
-    - cron: "0 0 * * *"
 
 jobs:
   test:
@@ -30,14 +28,13 @@ jobs:
         spack -e tests config add config:install_tree:root:/opt/spack
         spack -e tests config add view:/opt/view
 
-    - name: Add mochi-spack-packages
+    - name: Show environment
       run: |
-        git clone https://github.com/mochi-hpc/mochi-spack-packages
-        spack -e tests repo add mochi-spack-packages
+        spack -e tests config blame repos
 
     - name: Install spack environment
       run: |
-        spack -e tests install
+        spack -d -e tests install
 
     - name: Show spack-installed packages for debugging
       run: |
